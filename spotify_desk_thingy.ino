@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "esp_task_wdt.h"
 #include "secrets.h"
 // ======================== WIFI ======================= //
 #include <WiFi.h>
@@ -272,12 +273,42 @@ void connect_to_wifi() {
 }
 
 void scrollTask(void* parameter) {
+  esp_task_wdt_add(NULL);
   for (;;) {
+    esp_task_wdt_reset();
     updateScrollSprites();
-    vTaskDelay(30 / portTICK_PERIOD_MS);
+    
+    // update progress bar and time every second
+    static unsigned long lastBarUpdate = 0;
+    unsigned long now = millis();
+    if (now - lastBarUpdate > 1000) {
+      lastBarUpdate = now;
+
+      int displayProgress = progress_ms;
+      if (playing) displayProgress += (now - lastProgressSync);
+
+      int progress_sec = displayProgress / 1000;
+      int duration_sec = duration_ms / 1000;
+      int progress_min = progress_sec / 60;
+      int progress_rem = progress_sec % 60;
+      int duration_min = duration_sec / 60;
+      int duration_rem = duration_sec % 60;
+
+      if (!songChanged && spritesReady) {
+        int barW = map(displayProgress, 0, duration_ms, 0, 155);
+        tft.fillRect(165, 125, barW, 6, textColor);
+        tft.fillRect(165 + barW, 125, 155 - barW, 6, bgColor);
+
+        char timeStr[20];
+        sprintf(timeStr, "%d:%02d / %d:%02d", progress_min, progress_rem, duration_min, duration_rem);
+        tft.setTextColor(textColor, bgColor);
+        tft.drawString(timeStr, 165, 110, 2);
+      }
+    }
+
+    vTaskDelay(50 / portTICK_PERIOD_MS);
   }
 }
-
 void setup() {
   Serial.begin(115200);
 
@@ -307,7 +338,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     scrollTask,    // function
     "scrollTask",  // name
-    4096,          // stack size
+    8192,          // stack size
     NULL,          // parameter
     1,             // priority
     NULL,          // handle
