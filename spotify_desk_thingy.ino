@@ -1,20 +1,19 @@
 #include <Arduino.h>
+#include "secrets.h"
 // ======================== WIFI ======================= //
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-#include "secrets.h"
-
 char* SSID = WIFI_SSID;
 const char* PASSWORD = WIFI_PASSWORD;
-const char* CLIENT_ID = SPOTIFY_CLIENT_ID;
-const char* CLIENT_SECRET = SPOTIFY_CLIENT_SECRET;
-const char* REFRESH_TOKEN = SPOTIFY_REFRESH_TOKEN;
-
 // ===================================================== //
 
 // ======================= SPOTIFY ===================== //
 #include <SpotifyEsp32.h>
+
+const char* CLIENT_ID = SPOTIFY_CLIENT_ID;
+const char* CLIENT_SECRET = SPOTIFY_CLIENT_SECRET;
+const char* REFRESH_TOKEN = SPOTIFY_REFRESH_TOKEN;
 
 unsigned long lastApiCall = 0;
 unsigned long lastProgressSync = 0;
@@ -60,22 +59,20 @@ int trackSpriteW = 0, artistSpriteW = 0;
 bool trackScrollLeft  = true, artistScrollLeft  = true;
 bool trackDone        = false, artistDone        = false;
 bool trackPaused      = true,  artistPaused      = true;
-unsigned long trackPauseStart = 0, artistPauseStart = 0;
-// ===================================================== //
 
-volatile bool spritesReady = false;
-volatile bool songChanged = false;  // ← add this
+unsigned long trackPauseStart = 0, artistPauseStart = 0;
+volatile bool spritesReady = false, songChanged = false;
+
+long avgR = 0, avgG = 0, avgB = 0;
+int avgSamples = 0;
+uint16_t bgColor, textColor;
+// ===================================================== //
 
 bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
   if (y >= tft.height()) return 0;
   tft.pushImage(x, y, w, h, bitmap);
   return 1;
 }
-
-long avgR = 0, avgG = 0, avgB = 0;
-int avgSamples = 0;
-uint16_t bgColor;
-uint16_t textColor;
 
 bool sample_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
   if (x == 0 && y == 0) {
@@ -127,7 +124,6 @@ uint16_t getAverageColor() {
   avgG /= avgSamples;
   avgB /= avgSamples;
 
-  Serial.printf("avg r=%ld g=%ld b=%ld\n", avgR, avgG, avgB);
   return tft.color565(avgR << 3, avgG << 2, avgB << 3);
 }
 
@@ -142,10 +138,10 @@ bool updateSpotifyImage(String spotifyImageURL) {
 
   TJpgDec.drawFsJpg(0, 45, "/SpotifyTrack.jpg");
 
-  bgColor = getAverageColor();                     // decode + sample
+  bgColor = getAverageColor(); 
   textColor = getTextColor(bgColor);
-  tft.fillScreen(bgColor);                         // fill screen with avg color
-  TJpgDec.drawFsJpg(0, 45, "/SpotifyTrack.jpg");  // redraw image on top
+  tft.fillScreen(bgColor); 
+  TJpgDec.drawFsJpg(0, 45, "/SpotifyTrack.jpg");
 
   // ---- Track sprite ----
   sTrack.deleteSprite();
@@ -167,7 +163,7 @@ bool updateSpotifyImage(String spotifyImageURL) {
   sArtist.createSprite(800, SPRITE_H_ARTIST);
   sArtist.setTextColor(textColor);
   artistW = sArtist.textWidth(artists, 2);
-  artistDone = (artistW <= VISIBLE_W);  // ← no scroll needed if text fits
+  artistDone = (artistW <= VISIBLE_W);
   artistSpriteW = VISIBLE_W + artistW;
   sArtist.deleteSprite();
   sArtist.createSprite(artistSpriteW, SPRITE_H_ARTIST);
@@ -181,9 +177,6 @@ bool updateSpotifyImage(String spotifyImageURL) {
   trackDone        = false; artistDone        = false;
   trackPauseStart  = millis(); artistPauseStart = millis();
   trackPaused      = true;  artistPaused      = true;
-
-  Serial.printf("trackW=%d VISIBLE_W=%d trackDone=%d\n", trackW, VISIBLE_W, trackDone);
-  Serial.printf("artistW=%d VISIBLE_W=%d artistDone=%d\n", artistW, VISIBLE_W, artistDone);
 
   if (trackW <= VISIBLE_W) {
     trackDone = true;
@@ -213,7 +206,7 @@ void updateScrollSprites() {
   lastScroll = millis();
 
   // --- Track ---
-  tft.fillRect(SPRITE_X, 45, VISIBLE_W, SPRITE_H_TRACK, bgColor);  // ← clears area
+  tft.fillRect(SPRITE_X, 45, VISIBLE_W, SPRITE_H_TRACK, bgColor);
   sTrack.fillSprite(TRANSPARENT_KEY);
   sTrack.fillSprite(bgColor);
   sTrack.setTextColor(textColor);
@@ -239,7 +232,7 @@ void updateScrollSprites() {
   }
 
   // --- Artists ---
-  tft.fillRect(SPRITE_X, 45 + SPRITE_H_TRACK + 5, VISIBLE_W, SPRITE_H_ARTIST, bgColor);  // ← clears area
+  tft.fillRect(SPRITE_X, 45 + SPRITE_H_TRACK + 5, VISIBLE_W, SPRITE_H_ARTIST, bgColor);
   sArtist.fillSprite(TRANSPARENT_KEY);
   sArtist.fillSprite(bgColor);
   sArtist.setTextColor(textColor);
@@ -281,7 +274,7 @@ void connect_to_wifi() {
 void scrollTask(void* parameter) {
   for (;;) {
     updateScrollSprites();
-    vTaskDelay(30 / portTICK_PERIOD_MS);  // 30ms between updates
+    vTaskDelay(30 / portTICK_PERIOD_MS);
   }
 }
 
@@ -305,7 +298,6 @@ void setup() {
   connect_to_wifi();
 
   if (SPIFFS.exists("/SpotifyTrack.jpg")) {
-    Serial.println("Removing cached image");
     SPIFFS.remove("/SpotifyTrack.jpg");
   }
 
@@ -326,7 +318,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // ===== Sync with Spotify every 1 seconds =====
+  // ===== Sync with Spotify every second =====
   if (now - lastApiCall > 1000) {
     response data = sp.current_playback_state();
 
@@ -348,10 +340,10 @@ void loop() {
       playing     = data.reply["is_playing"];
 
     if (lastSong != id) {
-      songChanged = true;        // ← flag song changed
+      songChanged = true;
       if (updateSpotifyImage(imageUrl)) {
         lastSong = id;
-        songChanged = false;     // ← done updating
+        songChanged = false;
       }
     }
 
