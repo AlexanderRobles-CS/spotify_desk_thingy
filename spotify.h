@@ -4,3 +4,4 @@
 extern Spotify sp;
 
 void initSpotify();
+void updatePlayback();
