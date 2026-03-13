@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "spotify.h"
 #include "esp_task_wdt.h"
 #include "secrets.h"
 // ======================== WIFI ======================= //
@@ -9,12 +10,6 @@ char* SSID = WIFI_SSID;
 const char* PASSWORD = WIFI_PASSWORD;
 // ===================================================== //
 
-// ======================= SPOTIFY ===================== //
-#include <SpotifyEsp32.h>
-
-const char* CLIENT_ID = SPOTIFY_CLIENT_ID;
-const char* CLIENT_SECRET = SPOTIFY_CLIENT_SECRET;
-const char* REFRESH_TOKEN = SPOTIFY_REFRESH_TOKEN;
 
 unsigned long lastApiCall = 0;
 unsigned long lastProgressSync = 0;
@@ -30,7 +25,6 @@ String imageUrl;
 String playlistURI;
 String lastSong = "";
 
-Spotify sp(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 // ===================================================== //
 
 // =================== TFT DISPLAY ===================== //
@@ -114,8 +108,7 @@ void setup() {
 
   connect_to_wifi();
 
-  sp.begin();
-  Serial.println("Connected to Spotify API.");
+  initSpotify();
 }
 
 void loop() {
