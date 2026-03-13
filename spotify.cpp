@@ -43,6 +43,8 @@ static uint16_t      textColor        = TFT_WHITE;
 
 static volatile bool fetchDone  = false;
 static volatile bool toggleDone = false;
+static volatile bool prevDone   = false;
+static volatile bool skipDone   = false;
 static char s_track[128]        = "";
 static char s_artists[256]      = "";
 static char s_imageUrl[128]     = "";
@@ -93,6 +95,22 @@ void spotifyFetchTask(void* param) {
   vTaskDelete(NULL);
 }
 
+void skipControlTask(void* param) {
+  Serial.printf("[SKIP] task started");
+  sp.skip();
+  skipDone = true;
+  Serial.println("[SKIP] task ending");
+  vTaskDelete(NULL);
+}
+
+void prevControlTask(void* param) {
+  Serial.printf("[PREVIOUS] task started");
+  sp.previous();
+  prevDone = true;
+  Serial.println("[PREVIOUS] task ending");
+  vTaskDelete(NULL);
+}
+
 void playbackControlTask(void* param) {
   Serial.printf("[TOGGLE] task started, playing=%d\n", playing);
   if (playing) {
@@ -111,8 +129,26 @@ static void startFetch() {
   fetchDone   = false;
   state       = STATE_FETCHING;
   lastApiCall = millis();
-  Serial.println("[STATE] → FETCHING");
+  Serial.println("[STATE] → FETCHING\n");
   xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 16384, NULL, 1, NULL, 0);
+}
+
+static void startSkip() {
+  skipDone    = false;
+  progress_ms = 0;
+  lastProgressSync = millis();
+  state       = STATE_TOGGLING;
+  Serial.println("[STATE] → SKIP");
+  xTaskCreatePinnedToCore(skipControlTask, "skip", 8192, NULL, 1, NULL, 0);
+}
+
+static void startPrev() {
+  prevDone    = false;
+  progress_ms = 0;
+  lastProgressSync = millis();
+  state       = STATE_TOGGLING;
+  Serial.println("[STATE] → PREVIOUS");
+  xTaskCreatePinnedToCore(prevControlTask, "previous", 8192, NULL, 1, NULL, 0);
 }
 
 static void startToggle() {
@@ -180,6 +216,16 @@ void updatePlayback() {
         startToggle();
         break;
       }
+      if (prevButtonPressed) {
+        prevButtonPressed = false;
+        startPrev();
+        break;
+      }
+      if (skipButtonPressed) {
+        skipButtonPressed = false;
+        startSkip();
+        break;
+      }
       if (now - lastApiCall > 5000) {
         startFetch();
       }
@@ -201,6 +247,16 @@ void updatePlayback() {
     case STATE_TOGGLING:
       if (toggleDone) {
         toggleDone = false;
+        startFetch();
+      }
+
+      if (prevDone) {
+        prevDone = false;
+        startFetch();
+      }
+
+      if (skipDone) {
+        skipDone = false;
         startFetch();
       }
       break;
@@ -235,7 +291,6 @@ void updatePlayback() {
   static unsigned long lastPrint = 0;
   if (now - lastPrint > 1000) {
     lastPrint = now;
-    Serial.printf("Image URL: %s\n", imageUrl.c_str());
     Serial.printf("Currently playing: %s - %s\n", track.c_str(), artists.c_str());
     Serial.printf("Time: %d:%02d / %d:%02d\n", progress_min, progress_rem, duration_min, duration_rem);
   }
