@@ -83,8 +83,7 @@ void spotifyFetchTask(void* param) {
       strlcat(s_artists, result->reply["item"]["artists"][i]["name"].as<const char*>(), sizeof(s_artists));
     }
 
-    Serial.printf("[FETCH] track: %s\n", s_track);
-    fetchDone = true;  // set AFTER all data written
+    fetchDone = true;
   } else {
     Serial.println("[FETCH] bad/empty response");
   }
