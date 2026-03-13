@@ -15,6 +15,12 @@ static uint32_t rTotal = 0, gTotal = 0, bTotal = 0, pixelCount = 0;
 long avgR = 0, avgG = 0, avgB = 0;
 int avgSamples = 0;
 
+static bool dirtyProgressBar = false;
+static bool dirtyTrackInfo   = false;
+
+void markProgressDirty() { dirtyProgressBar = true; }
+void markTrackDirty()    { dirtyTrackInfo   = true; }
+
 void resetColorSample() {
   rTotal = 0; gTotal = 0; bTotal = 0; pixelCount = 0;
 }
@@ -120,6 +126,10 @@ String truncate(String text, int maxChars) {
 }
 
 void updateTrackInfo(String track, String artists, uint16_t bgColor, uint16_t textColor) {
+  if (!dirtyTrackInfo) return;
+  dirtyTrackInfo = false;
+
+  tft.startWrite();
   tft.fillRect(150, 0, 170, 240, bgColor);
   tft.setTextColor(textColor, bgColor);
 
@@ -130,10 +140,13 @@ void updateTrackInfo(String track, String artists, uint16_t bgColor, uint16_t te
   tft.setTextSize(1);
   tft.setCursor(158, 104);
   tft.println(truncate(artists, 25));
+  tft.endWrite();
 }
 
 void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint16_t textColor) {
+  if (!dirtyProgressBar) return;
   if (duration_ms == 0) return;
+  dirtyProgressBar = false;
 
   int barX = 158;
   int barY = 125;
@@ -143,19 +156,19 @@ void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint1
   float ratio = (float)progress_ms / (float)duration_ms;
   int filled = (int)(ratio * barW);
 
-  // draw bar
-  tft.fillRect(barX, barY, barW, barH, tft.color565(80, 80, 80));
-  tft.fillRect(barX, barY, filled, barH, textColor);
+  tft.startWrite();
+  for (int row = barY; row < barY + barH; row++) {
+    tft.drawFastHLine(barX, row, filled, textColor);
+    tft.drawFastHLine(barX + filled, row, barW - filled, tft.color565(80, 80, 80));
+  }
 
-  // draw time text
   int progress_sec = progress_ms / 1000;
   int duration_sec = duration_ms / 1000;
-
-  tft.fillRect(barX, barY + 10, 154, 12, bgColor);
   tft.setTextSize(1);
   tft.setTextColor(textColor, bgColor);
   tft.setCursor(barX, barY + 10);
   tft.printf("%d:%02d / %d:%02d", progress_sec / 60, progress_sec % 60, duration_sec / 60, duration_sec % 60);
+  tft.endWrite();
 }
 
 void initSPIFFS() {

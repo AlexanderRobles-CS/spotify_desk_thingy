@@ -77,6 +77,7 @@ void updatePlayback() {
         if (updateSpotifyImage(imageUrl)) {
           bgColor   = getAverageColor();
           textColor = getTextColor(bgColor);
+          markTrackDirty();
           updateTrackInfo(track, artists, bgColor, textColor);
           lastSong  = id;
         }
@@ -96,6 +97,11 @@ void updatePlayback() {
   int duration_min = duration_sec / 60;
   int duration_rem = duration_sec % 60;
 
+  static int lastProgressSec = -1;
+  if (progress_sec != lastProgressSec) {
+    lastProgressSec = progress_sec;
+    markProgressDirty();
+  }
   updateProgressBar(displayProgress, duration_ms, bgColor, textColor);
 
   static unsigned long lastPrint = 0;
