@@ -1,8 +1,10 @@
 #include <Arduino.h>
 #include <SpotifyEsp32.h>
+#include "esp_task_wdt.h"
 #include "spotify.h"
 #include "secrets.h"
 #include "display.h"
+#include "controls.h"
 
 const char* CLIENT_ID     = SPOTIFY_CLIENT_ID;
 const char* CLIENT_SECRET = SPOTIFY_CLIENT_SECRET;
@@ -10,9 +12,21 @@ const char* REFRESH_TOKEN = SPOTIFY_REFRESH_TOKEN;
 
 Spotify sp(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 
-// State
+// ─── State machine ────────────────────────────────────────────────────────────
+
+enum SpotifyState {
+  STATE_IDLE,
+  STATE_FETCHING,
+  STATE_TOGGLING
+};
+
+static SpotifyState state = STATE_IDLE;
+
+// ─── Local playback state ─────────────────────────────────────────────────────
+
 static unsigned long lastApiCall      = 0;
 static unsigned long lastProgressSync = 0;
+static unsigned long lastButtonPress  = 0;
 static int           progress_ms      = 0;
 static int           duration_ms      = 0;
 static bool          playing          = false;
@@ -25,71 +39,166 @@ static String        lastSong         = "";
 static uint16_t      bgColor          = TFT_BLACK;
 static uint16_t      textColor        = TFT_WHITE;
 
-// FreeRTOS async fetch
-static volatile bool fetchPending = false;
-static volatile bool fetchDone    = false;
-static response      fetchedData;
+// ─── Shared fetch state (written by task, read by main loop) ──────────────────
+
+static volatile bool fetchDone  = false;
+static volatile bool toggleDone = false;
+static char s_track[128]        = "";
+static char s_artists[256]      = "";
+static char s_imageUrl[128]     = "";
+static char s_playlist[128]     = "";
+static char s_id[64]            = "";
+static int  s_progress_ms       = 0;
+static int  s_duration_ms       = 0;
+static bool s_playing           = false;
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
 
 void spotifyFetchTask(void* param) {
-  fetchedData = sp.current_playback_state();
-  fetchDone    = true;
-  fetchPending = false;
+  Serial.println("[FETCH] task started");
+  esp_task_wdt_add(NULL);
+
+  // Heap allocate so destructor runs cleanly before vTaskDelete
+  response* result = new response();
+  *result = sp.current_playback_state();
+  esp_task_wdt_reset();
+
+  Serial.printf("[FETCH] status: %d\n", result->status_code);
+
+  if (result->status_code == 200 && !result->reply.isNull()) {
+    strlcpy(s_track,    result->reply["item"]["name"].as<const char*>(),                      sizeof(s_track));
+    strlcpy(s_id,       result->reply["item"]["id"].as<const char*>(),                        sizeof(s_id));
+    strlcpy(s_imageUrl, result->reply["item"]["album"]["images"][1]["url"].as<const char*>(), sizeof(s_imageUrl));
+    strlcpy(s_playlist, result->reply["context"]["uri"].as<const char*>(),                    sizeof(s_playlist));
+    s_progress_ms = result->reply["progress_ms"];
+    s_duration_ms = result->reply["item"]["duration_ms"];
+    s_playing     = result->reply["is_playing"];
+
+    int count = result->reply["item"]["artists"].size();
+    s_artists[0] = '\0';
+    for (int i = 0; i < count; i++) {
+      if (i > 0) strlcat(s_artists, ", ", sizeof(s_artists));
+      strlcat(s_artists, result->reply["item"]["artists"][i]["name"].as<const char*>(), sizeof(s_artists));
+    }
+
+    Serial.printf("[FETCH] track: %s\n", s_track);
+    fetchDone = true;  // set AFTER all data written
+  } else {
+    Serial.println("[FETCH] bad/empty response");
+  }
+
+  delete result;  // explicitly free before task ends
+  esp_task_wdt_delete(NULL);
+  Serial.println("[FETCH] task ending");
   vTaskDelete(NULL);
 }
+
+void playbackControlTask(void* param) {
+  Serial.printf("[TOGGLE] task started, playing=%d\n", playing);
+  if (playing) {
+    sp.start_resume_playback();
+  } else {
+    sp.pause_playback();
+  }
+  toggleDone = true;
+  Serial.println("[TOGGLE] task ending");
+  vTaskDelete(NULL);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+static void startFetch() {
+  fetchDone   = false;
+  state       = STATE_FETCHING;
+  lastApiCall = millis();
+  Serial.println("[STATE] → FETCHING");
+  xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 16384, NULL, 1, NULL, 0);
+}
+
+static void startToggle() {
+  toggleDone      = false;
+  playing         = !playing;
+  lastButtonPress = millis();
+  state           = STATE_TOGGLING;
+  Serial.printf("[STATE] → TOGGLING (playing=%d)\n", playing);
+  xTaskCreatePinnedToCore(playbackControlTask, "playback", 8192, NULL, 1, NULL, 0);
+}
+
+static void applyFetchResult() {
+  track       = s_track;
+  id          = s_id;
+  artists     = s_artists;
+  imageUrl    = s_imageUrl;
+  playlistURI = s_playlist;
+  progress_ms = s_progress_ms;
+  duration_ms = s_duration_ms;
+
+  if (millis() - lastButtonPress > 2000) {
+    playing = s_playing;
+  }
+
+  if (lastSong != id) {
+    if (updateSpotifyImage(imageUrl)) {
+      bgColor   = getAverageColor();
+      textColor = getTextColor(bgColor);
+      buildScrollSprites(track, artists, bgColor, textColor);
+      lastSong  = id;
+    }
+  }
+
+  lastProgressSync = millis();
+  Serial.println("[STATE] → IDLE");
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
 void initSpotify() {
   sp.begin();
   Serial.println("Connected to Spotify API.");
 }
 
+// ─── Main loop ────────────────────────────────────────────────────────────────
+
 void updatePlayback() {
   unsigned long now = millis();
 
-  unsigned long pollInterval = playing ? 5000 : 10000;
+  switch (state) {
 
-  if (now - lastApiCall > pollInterval && !fetchPending) {
-    fetchPending = true;
-    fetchDone    = false;
-    xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 8192, NULL, 1, NULL, 0);
-    lastApiCall  = now;
+    case STATE_IDLE:
+      if (playbackButtonPressed) {
+        playbackButtonPressed = false;
+        startToggle();
+        break;
+      }
+      if (now - lastApiCall > (unsigned long)(playing ? 5000 : 10000)) {
+        startFetch();
+      }
+      break;
+
+    case STATE_FETCHING:
+      if (fetchDone) {
+        fetchDone = false;
+        applyFetchResult();
+        state = STATE_IDLE;
+        // now check button
+        if (playbackButtonPressed) {
+          playbackButtonPressed = false;
+          startToggle();
+        }
+      }
+      break;     
+
+    case STATE_TOGGLING:
+      if (toggleDone) {
+        toggleDone = false;
+        startFetch();
+      }
+      break;
   }
 
-  if (fetchDone) {
-    fetchDone = false;
-    response data = fetchedData;
-
-    if (data.status_code == 200 && !data.reply.isNull()) {
-      track = data.reply["item"]["name"].as<String>();
-      id    = data.reply["item"]["id"].as<String>();
-
-      int artistCount = data.reply["item"]["artists"].size();
-      artists = "";
-      for (int i = 0; i < artistCount; i++) {
-        if (i > 0) artists += ", ";
-        artists += data.reply["item"]["artists"][i]["name"].as<String>();
-      }
-
-      imageUrl    = data.reply["item"]["album"]["images"][1]["url"].as<String>();
-      playlistURI = data.reply["context"]["uri"].as<String>();
-      progress_ms = data.reply["progress_ms"];
-      duration_ms = data.reply["item"]["duration_ms"];
-      playing     = data.reply["is_playing"];
-
-     if (lastSong != id) {
-      if (updateSpotifyImage(imageUrl)) {
-        bgColor   = getAverageColor();
-        textColor = getTextColor(bgColor);
-        buildScrollSprites(track, artists, bgColor, textColor);
-        lastSong  = id;
-      }
-    }
-
-      lastProgressSync = now;
-    }
-  }
-
+  // Progress (always runs)
   int displayProgress = progress_ms;
-  if (playing) displayProgress += (now - lastProgressSync);
+  if (playing) displayProgress += (int)(now - lastProgressSync);
 
   int progress_sec = displayProgress / 1000;
   int duration_sec = duration_ms / 1000;
@@ -98,11 +207,8 @@ void updatePlayback() {
   int duration_min = duration_sec / 60;
   int duration_rem = duration_sec % 60;
 
-  if (duration_ms > 0 && displayProgress >= duration_ms && !fetchPending) {
-    fetchPending = true;
-    fetchDone    = false;
-    xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 8192, NULL, 1, NULL, 0);
-    lastApiCall  = now;
+  if (state == STATE_IDLE && duration_ms > 0 && displayProgress >= duration_ms) {
+    startFetch();
     return;
   }
 
@@ -111,9 +217,10 @@ void updatePlayback() {
     lastProgressSec = progress_sec;
     markProgressDirty();
   }
+
   updateScrollSprites();
   int clampedProgress = min(displayProgress, duration_ms);
-  updateProgressBar(clampedProgress, duration_ms, bgColor, textColor);;
+  updateProgressBar(clampedProgress, duration_ms, bgColor, textColor);
 
   static unsigned long lastPrint = 0;
   if (now - lastPrint > 1000) {

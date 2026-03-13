@@ -2,6 +2,7 @@
 #include "spotify.h"
 #include "secrets.h"
 #include "display.h"
+#include "controls.h"
 // ======================== WIFI ======================= //
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -24,7 +25,6 @@ void connect_to_wifi() {
   Serial.println("\nConnected to WiFi");
 }
 
-
 void setup() {
   Serial.begin(115200);
 
@@ -37,6 +37,8 @@ void setup() {
   connect_to_wifi();
 
   initSpotify();
+
+  initControls();
 }
 
 void loop() {
