@@ -45,7 +45,9 @@ void initSpotify() {
 void updatePlayback() {
   unsigned long now = millis();
 
-  if (now - lastApiCall > 5000 && !fetchPending) {
+  unsigned long pollInterval = playing ? 5000 : 10000;
+
+  if (now - lastApiCall > pollInterval && !fetchPending) {
     fetchPending = true;
     fetchDone    = false;
     xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 8192, NULL, 1, NULL, 0);
@@ -96,13 +98,22 @@ void updatePlayback() {
   int duration_min = duration_sec / 60;
   int duration_rem = duration_sec % 60;
 
+  if (duration_ms > 0 && displayProgress >= duration_ms && !fetchPending) {
+    fetchPending = true;
+    fetchDone    = false;
+    xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 8192, NULL, 1, NULL, 0);
+    lastApiCall  = now;
+    return;
+  }
+
   static int lastProgressSec = -1;
   if (progress_sec != lastProgressSec) {
     lastProgressSec = progress_sec;
     markProgressDirty();
   }
   updateScrollSprites();
-  updateProgressBar(displayProgress, duration_ms, bgColor, textColor);
+  int clampedProgress = min(displayProgress, duration_ms);
+  updateProgressBar(clampedProgress, duration_ms, bgColor, textColor);;
 
   static unsigned long lastPrint = 0;
   if (now - lastPrint > 1000) {
