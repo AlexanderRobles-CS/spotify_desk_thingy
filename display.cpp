@@ -125,8 +125,10 @@ bool updateSpotifyImage(String spotifyImageURL) {
 }
 
 // ---- Sprite constants ----
-#define SPRITE_X      158
-#define VISIBLE_W     162
+#define SPRITE_X        158
+#define TRACK_Y         70
+#define ARTIST_Y        100
+#define VISIBLE_W       162
 #define SPRITE_H_TRACK  28
 #define SPRITE_H_ARTIST 18
 
@@ -188,22 +190,32 @@ void buildScrollSprites(String track, String artists, uint16_t bg, uint16_t fg) 
   trackDone  = (trackW  <= VISIBLE_W);
   artistDone = (artistW <= VISIBLE_W);
 
+  if (trackDone) {
+    sTrack.pushSprite(SPRITE_X, TRACK_Y);
+  }
+  if (artistDone) {
+    sArtist.pushSprite(SPRITE_X, ARTIST_Y);
+  }
+
   spritesReady = true;
 }
 
 void updateScrollSprites() {
   if (!spritesReady) return;
+  if (trackDone && artistDone) return;
   static unsigned long lastScroll = 0;
   if (millis() - lastScroll < 50) return;
   lastScroll = millis();
 
-  // ---- Track ----
-  sTrack.fillSprite(bgColor);
-  sTrack.setTextColor(textColor);
-  sTrack.drawString(spriteTrack, trackX, 0, 4);
-  sTrack.pushSprite(SPRITE_X, 70);
+  tft.startWrite();
 
+  // ---- Track ----
   if (!trackDone) {
+    sTrack.fillSprite(bgColor);
+    sTrack.setTextColor(textColor);
+    sTrack.drawString(spriteTrack, trackX, 0, 4);
+    sTrack.pushSprite(SPRITE_X, TRACK_Y);
+
     if (trackPaused) {
       if (millis() - trackPauseStart >= 1000) trackPaused = false;
     } else {
@@ -216,18 +228,25 @@ void updateScrollSprites() {
         }
       } else {
         trackX++;
-        if (trackX >= 0) { trackX = 0; trackDone = true; }
+        if (trackX >= 0) {
+          trackX = 0;
+          sTrack.fillSprite(bgColor);
+          sTrack.setTextColor(textColor);
+          sTrack.drawString(spriteTrack, 0, 0, 4);
+          sTrack.pushSprite(SPRITE_X, TRACK_Y);
+          trackDone = true;
+        }
       }
     }
   }
 
   // ---- Artist ----
-  sArtist.fillSprite(bgColor);
-  sArtist.setTextColor(textColor);
-  sArtist.drawString(spriteArtists, artistX, 0, 2);
-  sArtist.pushSprite(SPRITE_X, 95);
-
   if (!artistDone) {
+    sArtist.fillSprite(bgColor);
+    sArtist.setTextColor(textColor);
+    sArtist.drawString(spriteArtists, artistX, 0, 2);
+    sArtist.pushSprite(SPRITE_X, ARTIST_Y);
+
     if (artistPaused) {
       if (millis() - artistPauseStart >= 1000) artistPaused = false;
     } else {
@@ -240,10 +259,19 @@ void updateScrollSprites() {
         }
       } else {
         artistX++;
-        if (artistX >= 0) { artistX = 0; artistDone = true; }
+        if (artistX >= 0) {
+          artistX = 0;
+          sArtist.fillSprite(bgColor);
+          sArtist.setTextColor(textColor);
+          sArtist.drawString(spriteArtists, 0, 0, 2);
+          sArtist.pushSprite(SPRITE_X, ARTIST_Y);
+          artistDone = true;
+        }
       }
     }
   }
+
+  tft.endWrite();
 }
 
 void resetScroll() {
