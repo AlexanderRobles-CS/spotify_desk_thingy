@@ -22,6 +22,8 @@ static String        artists          = "";
 static String        imageUrl         = "";
 static String        playlistURI      = "";
 static String        lastSong         = "";
+static uint16_t bgColor   = TFT_BLACK;
+static uint16_t textColor = TFT_WHITE;
 
 void initSpotify() {
   sp.begin();
@@ -53,9 +55,9 @@ void updatePlayback() {
 
       if (lastSong != id) {
         if (updateSpotifyImage(imageUrl)) {
-          uint16_t avg  = getAverageColor();
-          uint16_t text = getTextColor(avg);
-          updateTrackInfo(track, artists, avg, text);
+          bgColor  = getAverageColor();
+          textColor = getTextColor(bgColor);
+          updateTrackInfo(track, artists, bgColor, textColor);
           lastSong = id;
         }
       }
@@ -75,6 +77,8 @@ void updatePlayback() {
   int progress_rem = progress_sec % 60;
   int duration_min = duration_sec / 60;
   int duration_rem = duration_sec % 60;
+
+  updateProgressBar(displayProgress, duration_ms, bgColor, textColor);
 
   static unsigned long lastPrint = 0;
   if (now - lastPrint > 1000) {

@@ -133,6 +133,32 @@ void updateTrackInfo(String track, String artists, uint16_t bgColor, uint16_t te
   tft.println(truncate(artists, 25));
 }
 
+void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint16_t textColor) {
+  if (duration_ms == 0) return;
+
+  int barX = 158;
+  int barY = 125;
+  int barW = 154;
+  int barH = 6;
+
+  float ratio = (float)progress_ms / (float)duration_ms;
+  int filled = (int)(ratio * barW);
+
+  // draw bar
+  tft.fillRect(barX, barY, barW, barH, tft.color565(80, 80, 80));
+  tft.fillRect(barX, barY, filled, barH, textColor);
+
+  // draw time text
+  int progress_sec = progress_ms / 1000;
+  int duration_sec = duration_ms / 1000;
+
+  tft.fillRect(barX, barY + 10, 154, 12, bgColor);
+  tft.setTextSize(1);
+  tft.setTextColor(textColor, bgColor);
+  tft.setCursor(barX, barY + 10);
+  tft.printf("%d:%02d / %d:%02d", progress_sec / 60, progress_sec % 60, duration_sec / 60, duration_sec % 60);
+}
+
 void initSPIFFS() {
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialisation failed!");
