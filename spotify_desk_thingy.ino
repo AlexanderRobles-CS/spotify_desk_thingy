@@ -11,20 +11,6 @@ char* SSID = WIFI_SSID;
 const char* PASSWORD = WIFI_PASSWORD;
 // ===================================================== //
 
-unsigned long lastApiCall = 0;
-unsigned long lastProgressSync = 0;
-
-int progress_ms = 0;
-int duration_ms = 0;
-bool playing = false;
-
-String track;
-String id;
-String artists = "";
-String imageUrl;
-String playlistURI;
-String lastSong = "";
-
 void connect_to_wifi() {
   WiFi.disconnect(true);
   WiFi.setTxPower(WIFI_POWER_11dBm);

@@ -53,7 +53,9 @@ void updatePlayback() {
 
       if (lastSong != id) {
         if (updateSpotifyImage(imageUrl)) {
-          updateTrackInfo(track, artists);
+          uint16_t avg  = getAverageColor();
+          uint16_t text = getTextColor(avg);
+          updateTrackInfo(track, artists, avg, text);
           lastSong = id;
         }
       }
