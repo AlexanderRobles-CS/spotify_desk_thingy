@@ -22,8 +22,20 @@ static String        artists          = "";
 static String        imageUrl         = "";
 static String        playlistURI      = "";
 static String        lastSong         = "";
-static uint16_t bgColor   = TFT_BLACK;
-static uint16_t textColor = TFT_WHITE;
+static uint16_t      bgColor          = TFT_BLACK;
+static uint16_t      textColor        = TFT_WHITE;
+
+// FreeRTOS async fetch
+static volatile bool fetchPending = false;
+static volatile bool fetchDone    = false;
+static response      fetchedData;
+
+void spotifyFetchTask(void* param) {
+  fetchedData = sp.current_playback_state();
+  fetchDone    = true;
+  fetchPending = false;
+  vTaskDelete(NULL);
+}
 
 void initSpotify() {
   sp.begin();
@@ -33,8 +45,16 @@ void initSpotify() {
 void updatePlayback() {
   unsigned long now = millis();
 
-  if (now - lastApiCall > 5000) {
-    response data = sp.current_playback_state();
+  if (now - lastApiCall > 5000 && !fetchPending) {
+    fetchPending = true;
+    fetchDone    = false;
+    xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 8192, NULL, 1, NULL, 0);
+    lastApiCall  = now;
+  }
+
+  if (fetchDone) {
+    fetchDone = false;
+    response data = fetchedData;
 
     if (data.status_code == 200 && !data.reply.isNull()) {
       track = data.reply["item"]["name"].as<String>();
@@ -55,17 +75,15 @@ void updatePlayback() {
 
       if (lastSong != id) {
         if (updateSpotifyImage(imageUrl)) {
-          bgColor  = getAverageColor();
+          bgColor   = getAverageColor();
           textColor = getTextColor(bgColor);
           updateTrackInfo(track, artists, bgColor, textColor);
-          lastSong = id;
+          lastSong  = id;
         }
       }
 
       lastProgressSync = now;
     }
-
-    lastApiCall = now;
   }
 
   int displayProgress = progress_ms;

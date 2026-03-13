@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include "spotify.h"
-#include "esp_task_wdt.h"
 #include "secrets.h"
 #include "display.h"
 // ======================== WIFI ======================= //

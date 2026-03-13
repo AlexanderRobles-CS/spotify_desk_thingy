@@ -96,7 +96,6 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 }
 
 bool updateSpotifyImage(String spotifyImageURL) {
-  tft.fillScreen(TFT_BLACK);
   if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
   if (!getFile(spotifyImageURL, "/SpotifyTrack.jpg")) return false;
 
