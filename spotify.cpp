@@ -73,15 +73,14 @@ void updatePlayback() {
       duration_ms = data.reply["item"]["duration_ms"];
       playing     = data.reply["is_playing"];
 
-      if (lastSong != id) {
-        if (updateSpotifyImage(imageUrl)) {
-          bgColor   = getAverageColor();
-          textColor = getTextColor(bgColor);
-          markTrackDirty();
-          updateTrackInfo(track, artists, bgColor, textColor);
-          lastSong  = id;
-        }
+     if (lastSong != id) {
+      if (updateSpotifyImage(imageUrl)) {
+        bgColor   = getAverageColor();
+        textColor = getTextColor(bgColor);
+        buildScrollSprites(track, artists, bgColor, textColor);
+        lastSong  = id;
       }
+    }
 
       lastProgressSync = now;
     }
@@ -102,6 +101,7 @@ void updatePlayback() {
     lastProgressSec = progress_sec;
     markProgressDirty();
   }
+  updateScrollSprites();
   updateProgressBar(displayProgress, duration_ms, bgColor, textColor);
 
   static unsigned long lastPrint = 0;

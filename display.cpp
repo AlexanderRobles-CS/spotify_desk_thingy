@@ -18,6 +18,10 @@ int avgSamples = 0;
 static bool dirtyProgressBar = false;
 static bool dirtyTrackInfo   = false;
 
+static int trackScrollX  = 158;
+static int artistScrollX = 158;
+static unsigned long lastScroll = 0;
+
 void markProgressDirty() { dirtyProgressBar = true; }
 void markTrackDirty()    { dirtyTrackInfo   = true; }
 
@@ -120,28 +124,137 @@ bool updateSpotifyImage(String spotifyImageURL) {
   return true;
 }
 
-String truncate(String text, int maxChars) {
-  if (text.length() > maxChars) return text.substring(0, maxChars - 3) + "...";
-  return text;
+// ---- Sprite constants ----
+#define SPRITE_X      158
+#define VISIBLE_W     162
+#define SPRITE_H_TRACK  28
+#define SPRITE_H_ARTIST 18
+
+TFT_eSprite sTrack  = TFT_eSprite(&tft);
+TFT_eSprite sArtist = TFT_eSprite(&tft);
+
+static int  trackW = 0,  artistW = 0;
+static int  trackX = 0,  artistX = 0;
+static int  trackSpriteW = 0, artistSpriteW = 0;
+static bool trackScrollLeft  = true, artistScrollLeft  = true;
+static bool trackDone        = false, artistDone        = false;
+static bool trackPaused      = true,  artistPaused      = true;
+static unsigned long trackPauseStart = 0, artistPauseStart = 0;
+static bool spritesReady = false;
+
+static String  spriteTrack   = "";
+static String  spriteArtists = "";
+static uint16_t bgColor      = TFT_BLACK;
+static uint16_t textColor    = TFT_WHITE;
+
+void buildScrollSprites(String track, String artists, uint16_t bg, uint16_t fg) {
+  spritesReady = false;
+  spriteTrack   = track;
+  spriteArtists = artists;
+  bgColor       = bg;
+  textColor     = fg;
+
+  // ---- Track sprite ----
+  sTrack.setColorDepth(16);
+  sTrack.createSprite(VISIBLE_W, SPRITE_H_TRACK);
+  sTrack.setTextColor(fg);
+  trackW = sTrack.textWidth(track, 4);
+  sTrack.deleteSprite();
+
+  trackSpriteW = max((int)VISIBLE_W, trackW);
+  sTrack.createSprite(trackSpriteW, SPRITE_H_TRACK);
+  sTrack.fillSprite(bg);
+  sTrack.setTextColor(fg);
+  sTrack.drawString(track, 0, 0, 4);
+
+  // ---- Artist sprite ----
+  sArtist.setColorDepth(16);
+  sArtist.createSprite(VISIBLE_W, SPRITE_H_ARTIST);
+  sArtist.setTextColor(fg);
+  artistW = sArtist.textWidth(artists, 2);
+  sArtist.deleteSprite();
+
+  artistSpriteW = max((int)VISIBLE_W, artistW);
+  sArtist.createSprite(artistSpriteW, SPRITE_H_ARTIST);
+  sArtist.fillSprite(bg);
+  sArtist.setTextColor(fg);
+  sArtist.drawString(artists, 0, 0, 2);
+
+  // ---- Reset scroll state ----
+  trackX = 0;  artistX = 0;
+  trackScrollLeft = true;  artistScrollLeft = true;
+  trackPauseStart = millis(); artistPauseStart = millis();
+  trackPaused = true;  artistPaused = true;
+  trackDone  = (trackW  <= VISIBLE_W);
+  artistDone = (artistW <= VISIBLE_W);
+
+  spritesReady = true;
 }
 
-void updateTrackInfo(String track, String artists, uint16_t bgColor, uint16_t textColor) {
-  if (!dirtyTrackInfo) return;
-  dirtyTrackInfo = false;
+void updateScrollSprites() {
+  if (!spritesReady) return;
+  static unsigned long lastScroll = 0;
+  if (millis() - lastScroll < 50) return;
+  lastScroll = millis();
 
-  tft.startWrite();
-  tft.fillRect(150, 0, 170, 240, bgColor);
-  tft.setTextColor(textColor, bgColor);
+  // ---- Track ----
+  sTrack.fillSprite(bgColor);
+  sTrack.setTextColor(textColor);
+  sTrack.drawString(spriteTrack, trackX, 0, 4);
+  sTrack.pushSprite(SPRITE_X, 70);
 
-  tft.setTextSize(2);
-  tft.setCursor(158, 80);
-  tft.println(truncate(track, 13));
+  if (!trackDone) {
+    if (trackPaused) {
+      if (millis() - trackPauseStart >= 1000) trackPaused = false;
+    } else {
+      if (trackScrollLeft) {
+        trackX--;
+        if (trackX <= -(trackW - VISIBLE_W)) {
+          trackScrollLeft = false;
+          trackPauseStart = millis();
+          trackPaused     = true;
+        }
+      } else {
+        trackX++;
+        if (trackX >= 0) { trackX = 0; trackDone = true; }
+      }
+    }
+  }
 
-  tft.setTextSize(1);
-  tft.setCursor(158, 104);
-  tft.println(truncate(artists, 25));
-  tft.endWrite();
+  // ---- Artist ----
+  sArtist.fillSprite(bgColor);
+  sArtist.setTextColor(textColor);
+  sArtist.drawString(spriteArtists, artistX, 0, 2);
+  sArtist.pushSprite(SPRITE_X, 95);
+
+  if (!artistDone) {
+    if (artistPaused) {
+      if (millis() - artistPauseStart >= 1000) artistPaused = false;
+    } else {
+      if (artistScrollLeft) {
+        artistX--;
+        if (artistX <= -(artistW - VISIBLE_W)) {
+          artistScrollLeft = false;
+          artistPauseStart = millis();
+          artistPaused     = true;
+        }
+      } else {
+        artistX++;
+        if (artistX >= 0) { artistX = 0; artistDone = true; }
+      }
+    }
+  }
 }
+
+void resetScroll() {
+  trackX = 0; artistX = 0;
+  trackScrollLeft = true; artistScrollLeft = true;
+  trackPaused = true; artistPaused = true;
+  trackPauseStart = millis(); artistPauseStart = millis();
+  trackDone = false; artistDone = false;
+  spritesReady = false;
+}
+
 
 void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint16_t textColor) {
   if (!dirtyProgressBar) return;
