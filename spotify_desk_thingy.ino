@@ -64,6 +64,8 @@ bool trackPaused      = true,  artistPaused      = true;
 unsigned long trackPauseStart = 0, artistPauseStart = 0;
 volatile bool spritesReady = false, songChanged = false;
 
+SemaphoreHandle_t tftMutex;
+
 long avgR = 0, avgG = 0, avgB = 0;
 int avgSamples = 0;
 uint16_t bgColor, textColor;
@@ -129,6 +131,7 @@ uint16_t getAverageColor() {
 }
 
 bool updateSpotifyImage(String spotifyImageURL) {
+  xSemaphoreTake(tftMutex, portMAX_DELAY);
   spritesReady = false;
 
   if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
@@ -194,6 +197,7 @@ bool updateSpotifyImage(String spotifyImageURL) {
   } 
 
   spritesReady = true;
+  xSemaphoreGive(tftMutex);
   return true;
 }
 
@@ -207,8 +211,6 @@ void updateScrollSprites() {
   lastScroll = millis();
 
   // --- Track ---
-  tft.fillRect(SPRITE_X, 45, VISIBLE_W, SPRITE_H_TRACK, bgColor);
-  sTrack.fillSprite(TRANSPARENT_KEY);
   sTrack.fillSprite(bgColor);
   sTrack.setTextColor(textColor);
   sTrack.drawString(track, trackX, 0, 4);
@@ -233,8 +235,6 @@ void updateScrollSprites() {
   }
 
   // --- Artists ---
-  tft.fillRect(SPRITE_X, 45 + SPRITE_H_TRACK + 5, VISIBLE_W, SPRITE_H_ARTIST, bgColor);
-  sArtist.fillSprite(TRANSPARENT_KEY);
   sArtist.fillSprite(bgColor);
   sArtist.setTextColor(textColor);
   sArtist.drawString(artists, artistX, 0, 2);
@@ -259,6 +259,43 @@ void updateScrollSprites() {
   }
 }
 
+void updateTimeBar(){
+  static unsigned long lastBarUpdate = 0;
+  static int lastBarW = -1;
+  unsigned long now = millis();
+  if (now - lastBarUpdate > 1000) {
+    lastBarUpdate = now;
+
+    int displayProgress = progress_ms;
+    if (playing) displayProgress += (now - lastProgressSync);
+
+    int progress_sec = displayProgress / 1000;
+    int duration_sec = duration_ms / 1000;
+    int progress_min = progress_sec / 60;
+    int progress_rem = progress_sec % 60;
+    int duration_min = duration_sec / 60;
+    int duration_rem = duration_sec % 60;
+
+    if (!songChanged && spritesReady) {
+      int barW = map(displayProgress, 0, duration_ms, 0, 155);
+      
+      if (barW != lastBarW) {
+        if (barW > lastBarW) {
+          tft.fillRect(165 + lastBarW, 125, barW - lastBarW, 6, textColor);
+        } else {
+          tft.fillRect(165 + barW, 125, lastBarW - barW, 6, bgColor);
+        }
+        lastBarW = barW;
+      }
+
+      char timeStr[20];
+      sprintf(timeStr, "%d:%02d / %d:%02d", progress_min, progress_rem, duration_min, duration_rem);
+      tft.setTextColor(textColor, bgColor);
+      tft.drawString(timeStr, 165, 110, 2);
+    }
+  }
+}
+
 void connect_to_wifi() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_STA);
@@ -277,33 +314,18 @@ void scrollTask(void* parameter) {
   for (;;) {
     esp_task_wdt_reset();
     updateScrollSprites();
-    
-    // update progress bar and time every second
-    static unsigned long lastBarUpdate = 0;
-    unsigned long now = millis();
-    if (now - lastBarUpdate > 1000) {
-      lastBarUpdate = now;
 
-      int displayProgress = progress_ms;
-      if (playing) displayProgress += (now - lastProgressSync);
+    if (xSemaphoreTake(tftMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+      updateScrollSprites();
 
-      int progress_sec = displayProgress / 1000;
-      int duration_sec = duration_ms / 1000;
-      int progress_min = progress_sec / 60;
-      int progress_rem = progress_sec % 60;
-      int duration_min = duration_sec / 60;
-      int duration_rem = duration_sec % 60;
-
-      if (!songChanged && spritesReady) {
-        int barW = map(displayProgress, 0, duration_ms, 0, 155);
-        tft.fillRect(165, 125, barW, 6, textColor);
-        tft.fillRect(165 + barW, 125, 155 - barW, 6, bgColor);
-
-        char timeStr[20];
-        sprintf(timeStr, "%d:%02d / %d:%02d", progress_min, progress_rem, duration_min, duration_rem);
-        tft.setTextColor(textColor, bgColor);
-        tft.drawString(timeStr, 165, 110, 2);
+      static unsigned long lastBarUpdate = 0;
+      unsigned long now = millis();
+      if (now - lastBarUpdate > 1000) {
+        lastBarUpdate = now;
+        updateTimeBar();
       }
+
+      xSemaphoreGive(tftMutex);
     }
 
     vTaskDelay(50 / portTICK_PERIOD_MS);
@@ -333,6 +355,8 @@ void setup() {
   }
 
   sp.begin();
+
+  tftMutex = xSemaphoreCreateMutex();
 
   // Start scroll on core 0 (Spotify runs on core 1 by default)
   xTaskCreatePinnedToCore(
