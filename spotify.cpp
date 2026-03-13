@@ -119,7 +119,17 @@ static void startToggle() {
   toggleDone      = false;
   playing         = !playing;
   lastButtonPress = millis();
-  state           = STATE_TOGGLING;
+
+  if (!playing) {
+    // pausing — freeze progress at current position
+    progress_ms      += (int)(millis() - lastProgressSync);
+    lastProgressSync  = millis();
+  } else {
+    // unpausing — reset sync so progress continues from now
+    lastProgressSync = millis();
+  }
+
+  state = STATE_TOGGLING;
   Serial.printf("[STATE] → TOGGLING (playing=%d)\n", playing);
   xTaskCreatePinnedToCore(playbackControlTask, "playback", 8192, NULL, 1, NULL, 0);
 }
@@ -170,7 +180,7 @@ void updatePlayback() {
         startToggle();
         break;
       }
-      if (now - lastApiCall > (unsigned long)(playing ? 5000 : 10000)) {
+      if (now - lastApiCall > 5000) {
         startFetch();
       }
       break;
