@@ -202,8 +202,27 @@ void buildScrollSprites(String track, String artists, uint16_t bg, uint16_t fg) 
 
 void updateScrollSprites() {
   if (!spritesReady) return;
-  if (trackDone && artistDone) return;
+
   static unsigned long lastScroll = 0;
+  static unsigned long scrollDoneTime = 0;
+
+  if (trackDone && artistDone) {
+    if (scrollDoneTime == 0) {
+      scrollDoneTime = millis();
+    }
+    if (millis() - scrollDoneTime >= 30000) {
+      trackX = 0; artistX = 0;
+      trackScrollLeft = true; artistScrollLeft = true;
+      trackPaused = true; artistPaused = true;
+      trackPauseStart = millis(); artistPauseStart = millis();
+      trackDone  = (trackW  <= VISIBLE_W);
+      artistDone = (artistW <= VISIBLE_W);
+      scrollDoneTime = 0;
+    }
+    return;
+  }
+
+  if (trackDone && artistDone) return;
   if (millis() - lastScroll < 50) return;
   lastScroll = millis();
 
