@@ -53,6 +53,7 @@ void updatePlayback() {
 
       if (lastSong != id) {
         if (updateSpotifyImage(imageUrl)) {
+          updateTrackInfo(track, artists);
           lastSong = id;
         }
       }

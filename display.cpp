@@ -1,4 +1,6 @@
 #include "display.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <TJpg_Decoder.h>
 #define FS_NO_GLOBALS
 #include <FS.h>
@@ -11,11 +13,14 @@ TFT_eSPI tft = TFT_eSPI();
 
 bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
   if (y >= tft.height()) return 0;
+  if (x >= 150) return 1;
   tft.pushImage(x, y, w, h, bitmap);
   return 1;
 }
 
 bool updateSpotifyImage(String spotifyImageURL) {
+  tft.fillScreen(TFT_BLACK);
+
   if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
 
   if (!getFile(spotifyImageURL, "/SpotifyTrack.jpg")) {
@@ -27,16 +32,32 @@ bool updateSpotifyImage(String spotifyImageURL) {
   return true;
 }
 
+String truncate(String text, int maxChars) {
+  if (text.length() > maxChars) return text.substring(0, maxChars - 3) + "...";
+  return text;
+}
+
+void updateTrackInfo(String track, String artists) {
+  tft.fillRect(150, 0, 170, 240, TFT_BLACK);
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+  tft.setTextSize(2);
+  tft.setCursor(158, 80);
+  tft.println(truncate(track, 10));
+
+  tft.setTextSize(1);
+  tft.setCursor(158, 104);
+  tft.println(truncate(artists, 20));
+}
+
 void initSPIFFS() {
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS initialisation failed!");
     while (1) yield();
   }
   Serial.println("\r\nSPIFFS Initialisation done.");
-
-  if (SPIFFS.exists("/SpotifyTrack.jpg")) {
-    SPIFFS.remove("/SpotifyTrack.jpg");
-  }
+  if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
 }
 
 void initTFTScreen() {
