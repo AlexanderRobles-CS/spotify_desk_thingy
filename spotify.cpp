@@ -50,6 +50,7 @@ static char s_artists[256]      = "";
 static char s_imageUrl[128]     = "";
 static char s_playlist[128]     = "";
 static char s_id[64]            = "";
+static char s_deviceId[64] = "";
 static int  s_progress_ms       = 0;
 static int  s_duration_ms       = 0;
 static bool s_playing           = false;
@@ -72,6 +73,7 @@ void spotifyFetchTask(void* param) {
     strlcpy(s_id,       result->reply["item"]["id"].as<const char*>(),                        sizeof(s_id));
     strlcpy(s_imageUrl, result->reply["item"]["album"]["images"][1]["url"].as<const char*>(), sizeof(s_imageUrl));
     strlcpy(s_playlist, result->reply["context"]["uri"].as<const char*>(),                    sizeof(s_playlist));
+    strlcpy(s_deviceId, result->reply["device"]["id"].as<const char*>(), sizeof(s_deviceId));
     s_progress_ms = result->reply["progress_ms"];
     s_duration_ms = result->reply["item"]["duration_ms"];
     s_playing     = result->reply["is_playing"];
@@ -83,11 +85,11 @@ void spotifyFetchTask(void* param) {
       strlcat(s_artists, result->reply["item"]["artists"][i]["name"].as<const char*>(), sizeof(s_artists));
     }
 
-    fetchDone = true;
   } else {
     Serial.println("[FETCH] bad/empty response");
   }
 
+  fetchDone = true;
   delete result;  // explicitly free before task ends
   esp_task_wdt_delete(NULL);
   Serial.println("[FETCH] task ending");
@@ -113,7 +115,7 @@ void prevControlTask(void* param) {
 void playbackControlTask(void* param) {
   Serial.printf("[TOGGLE] task started, playing=%d\n", playing);
   if (playing) {
-    sp.start_resume_playback();
+    sp.start_resume_playback(s_deviceId[0] != '\0' ? s_deviceId : nullptr);
   } else {
     sp.pause_playback();
   }
