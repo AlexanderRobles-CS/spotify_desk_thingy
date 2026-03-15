@@ -10,4 +10,3 @@ extern volatile bool          skipButtonPressed;
 extern volatile unsigned long last_skip_interrupt_time;
 
 void initControls();
- 

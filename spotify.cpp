@@ -5,6 +5,7 @@
 #include "secrets.h"
 #include "display.h"
 #include "controls.h"
+#include "devices.h"
 
 const char* CLIENT_ID     = SPOTIFY_CLIENT_ID;
 const char* CLIENT_SECRET = SPOTIFY_CLIENT_SECRET;
@@ -12,17 +13,22 @@ const char* REFRESH_TOKEN = SPOTIFY_REFRESH_TOKEN;
 
 Spotify sp(CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN);
 
-// ─── State machine ────────────────────────────────────────────────────────────
+// ─── Device list (owned here, declared extern in devices.h) ───────
+Device* deviceList = nullptr;
+int     deviceCount = 0;
+
+// ─── State machine ────────────────────────────────────────────────
 
 enum SpotifyState {
   STATE_IDLE,
   STATE_FETCHING,
-  STATE_TOGGLING
+  STATE_TOGGLING,
+  STATE_SHOWING_DEVICES
 };
 
 static SpotifyState state = STATE_IDLE;
 
-// ─── Local playback state ─────────────────────────────────────────────────────
+// ─── Local playback state ─────────────────────────────────────────
 
 static unsigned long lastApiCall      = 0;
 static unsigned long lastProgressSync = 0;
@@ -39,29 +45,29 @@ static String        lastSong         = "";
 static uint16_t      bgColor          = TFT_BLACK;
 static uint16_t      textColor        = TFT_WHITE;
 
-// ─── Shared fetch state (written by task, read by main loop) ──────────────────
+// ─── Shared fetch state (written by task, read by main loop) ──────
 
-static volatile bool fetchDone  = false;
-static volatile bool toggleDone = false;
-static volatile bool prevDone   = false;
-static volatile bool skipDone   = false;
-static char s_track[128]        = "";
-static char s_artists[256]      = "";
-static char s_imageUrl[128]     = "";
-static char s_playlist[128]     = "";
-static char s_id[64]            = "";
-static char s_deviceId[64] = "";
-static int  s_progress_ms       = 0;
-static int  s_duration_ms       = 0;
-static bool s_playing           = false;
+static volatile bool fetchDone        = false;
+static volatile bool toggleDone       = false;
+static volatile bool prevDone         = false;
+static volatile bool skipDone         = false;
+static volatile bool deviceFetchDone  = false;
+static char s_track[128]              = "";
+static char s_artists[256]            = "";
+static char s_imageUrl[128]           = "";
+static char s_playlist[128]           = "";
+static char s_id[64]                  = "";
+static char s_deviceId[64]            = "";
+static int  s_progress_ms             = 0;
+static int  s_duration_ms             = 0;
+static bool s_playing                 = false;
 
-// ─── Tasks ────────────────────────────────────────────────────────────────────
+// ─── Tasks ────────────────────────────────────────────────────────
 
 void spotifyFetchTask(void* param) {
   Serial.println("[FETCH] task started");
   esp_task_wdt_add(NULL);
 
-  // Heap allocate so destructor runs cleanly before vTaskDelete
   response* result = new response();
   *result = sp.current_playback_state();
   esp_task_wdt_reset();
@@ -73,7 +79,7 @@ void spotifyFetchTask(void* param) {
     strlcpy(s_id,       result->reply["item"]["id"].as<const char*>(),                        sizeof(s_id));
     strlcpy(s_imageUrl, result->reply["item"]["album"]["images"][1]["url"].as<const char*>(), sizeof(s_imageUrl));
     strlcpy(s_playlist, result->reply["context"]["uri"].as<const char*>(),                    sizeof(s_playlist));
-    strlcpy(s_deviceId, result->reply["device"]["id"].as<const char*>(), sizeof(s_deviceId));
+    strlcpy(s_deviceId, result->reply["device"]["id"].as<const char*>(),                      sizeof(s_deviceId));
     s_progress_ms = result->reply["progress_ms"];
     s_duration_ms = result->reply["item"]["duration_ms"];
     s_playing     = result->reply["is_playing"];
@@ -84,15 +90,37 @@ void spotifyFetchTask(void* param) {
       if (i > 0) strlcat(s_artists, ", ", sizeof(s_artists));
       strlcat(s_artists, result->reply["item"]["artists"][i]["name"].as<const char*>(), sizeof(s_artists));
     }
-
   } else {
     Serial.println("[FETCH] bad/empty response");
   }
 
   fetchDone = true;
-  delete result;  // explicitly free before task ends
+  delete result;
   esp_task_wdt_delete(NULL);
   Serial.println("[FETCH] task ending");
+  vTaskDelete(NULL);
+}
+
+void deviceFetchTask(void* param) {
+  Serial.println("[DEVICES] task started");
+  esp_task_wdt_add(NULL);
+
+  response* result = new response();
+  *result = sp.available_devices();
+  esp_task_wdt_reset();
+
+  Serial.printf("[DEVICES] status: %d\n", result->status_code);
+
+  if (result->status_code == 200 && !result->reply.isNull()) {
+    parseDevices(result->reply);
+  } else {
+    Serial.println("[DEVICES] bad/empty response");
+  }
+
+  deviceFetchDone = true;
+  delete result;
+  esp_task_wdt_delete(NULL);
+  Serial.println("[DEVICES] task ending");
   vTaskDelete(NULL);
 }
 
@@ -124,30 +152,64 @@ void playbackControlTask(void* param) {
   vTaskDelete(NULL);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────
+
+void parseDevices(JsonDocument& doc) {
+  delete[] deviceList;
+  deviceList  = nullptr;
+  deviceCount = 0;
+
+  JsonArray arr = doc["devices"].as<JsonArray>();
+  deviceCount = arr.size();
+  if (deviceCount == 0) return;
+
+  deviceList = new Device[deviceCount];
+
+  int i = 0;
+  for (JsonObject d : arr) {
+    deviceList[i].name   = d["name"]           | "Unknown";
+    deviceList[i].type   = d["type"]           | "?";
+    deviceList[i].id     = d["id"]             | "";
+    deviceList[i].active = d["is_active"]      | false;
+    deviceList[i].volume = d["volume_percent"] | 0;
+    i++;
+  }
+
+  Serial.printf("[DEVICES] parsed %d device(s)\n", deviceCount);
+  for (int i = 0; i < deviceCount; i++) {
+    Serial.printf("  [%d] %s (%s)\n", i, deviceList[i].name.c_str(), deviceList[i].id.c_str());
+  }
+}
 
 static void startFetch() {
   fetchDone   = false;
   state       = STATE_FETCHING;
   lastApiCall = millis();
-  Serial.println("[STATE] → FETCHING\n");
+  Serial.println("[STATE] → FETCHING");
   xTaskCreatePinnedToCore(spotifyFetchTask, "spotify", 16384, NULL, 1, NULL, 0);
 }
 
+static void startDeviceFetch() {
+  deviceFetchDone = false;
+  state           = STATE_TOGGLING;
+  Serial.println("[STATE] → FETCHING_DEVICES");
+  xTaskCreatePinnedToCore(deviceFetchTask, "devices", 16384, NULL, 1, NULL, 0);
+}
+
 static void startSkip() {
-  skipDone    = false;
-  progress_ms = 0;
+  skipDone         = false;
+  progress_ms      = 0;
   lastProgressSync = millis();
-  state       = STATE_TOGGLING;
+  state            = STATE_TOGGLING;
   Serial.println("[STATE] → SKIP");
   xTaskCreatePinnedToCore(skipControlTask, "skip", 8192, NULL, 1, NULL, 0);
 }
 
 static void startPrev() {
-  prevDone    = false;
-  progress_ms = 0;
+  prevDone         = false;
+  progress_ms      = 0;
   lastProgressSync = millis();
-  state       = STATE_TOGGLING;
+  state            = STATE_TOGGLING;
   Serial.println("[STATE] → PREVIOUS");
   xTaskCreatePinnedToCore(prevControlTask, "previous", 8192, NULL, 1, NULL, 0);
 }
@@ -158,17 +220,53 @@ static void startToggle() {
   lastButtonPress = millis();
 
   if (!playing) {
-    // pausing — freeze progress at current position
     progress_ms      += (int)(millis() - lastProgressSync);
     lastProgressSync  = millis();
   } else {
-    // unpausing — reset sync so progress continues from now
     lastProgressSync = millis();
   }
 
   state = STATE_TOGGLING;
   Serial.printf("[STATE] → TOGGLING (playing=%d)\n", playing);
   xTaskCreatePinnedToCore(playbackControlTask, "playback", 8192, NULL, 1, NULL, 0);
+}
+
+void handleDeviceTouch() {
+  uint16_t x, y;
+  if (!tft.getTouch(&x, &y, 20)) return;
+
+  int availableH = SCREEN_H - HEADER_H - 12;
+  int rowH       = min(ROW_HEIGHT, availableH / deviceCount);
+  int row        = (y - HEADER_H) / rowH;
+  if (row < 0 || row >= deviceCount) return;
+
+  Serial.printf("[TOUCH] tapped device %d: %s\n", row, deviceList[row].name.c_str());
+
+  sp.transfer_playback(deviceList[row].id.c_str());
+
+  // flash tap indicator
+  int tapY = HEADER_H + row * rowH + rowH / 2;
+  tft.fillCircle(300, tapY, 6, TFT_YELLOW);
+  delay(250);
+
+  // update active flags locally before redraw
+  for (int i = 0; i < deviceCount; i++) {
+    deviceList[i].active = (i == row);
+  }
+
+  drawDevices();
+  delay(1000);
+
+  // go back to main screen
+  tft.fillScreen(bgColor);
+  lastSong = "";
+  displayReady = true;
+  updateSpotifyImage(imageUrl);
+  bgColor   = getAverageColor();
+  textColor = getTextColor(bgColor);
+  buildScrollSprites(track, artists, bgColor, textColor);
+  lastApiCall = millis();
+  state = STATE_IDLE;
 }
 
 static void applyFetchResult() {
@@ -185,6 +283,7 @@ static void applyFetchResult() {
   }
 
   if (lastSong != id) {
+    displayReady = false;
     if (updateSpotifyImage(imageUrl)) {
       bgColor   = getAverageColor();
       textColor = getTextColor(bgColor);
@@ -197,19 +296,25 @@ static void applyFetchResult() {
   Serial.println("[STATE] → IDLE");
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Init ─────────────────────────────────────────────────────────
 
 void initSpotify() {
   sp.begin();
   Serial.println("Connected to Spotify API.");
 }
 
-// ─── Main loop ────────────────────────────────────────────────────────────────
+// ─── Main loop ────────────────────────────────────────────────────
 
 void updatePlayback() {
   unsigned long now = millis();
 
+  if (!displayReady) return; 
+
   switch (state) {
+
+    case STATE_SHOWING_DEVICES:
+      handleDeviceTouch();
+      return;
 
     case STATE_IDLE:
       if (playbackButtonPressed) {
@@ -224,7 +329,7 @@ void updatePlayback() {
       }
       if (skipButtonPressed) {
         skipButtonPressed = false;
-        startSkip();
+        startDeviceFetch();
         break;
       }
       if (now - lastApiCall > 5000) {
@@ -237,33 +342,35 @@ void updatePlayback() {
         fetchDone = false;
         applyFetchResult();
         state = STATE_IDLE;
-        // now check button
         if (playbackButtonPressed) {
           playbackButtonPressed = false;
           startToggle();
         }
       }
-      break;     
+      break;
 
     case STATE_TOGGLING:
       if (toggleDone) {
         toggleDone = false;
         startFetch();
       }
-
       if (prevDone) {
         prevDone = false;
         startFetch();
       }
-
       if (skipDone) {
         skipDone = false;
         startFetch();
       }
+      if (deviceFetchDone) {
+        deviceFetchDone = false;
+        drawDevices();
+        state = STATE_SHOWING_DEVICES;
+      }
       break;
   }
 
-  // Progress (always runs)
+  // ─── Progress (only runs when NOT showing devices) ────────────
   int displayProgress = progress_ms;
   if (playing) displayProgress += (int)(now - lastProgressSync);
 

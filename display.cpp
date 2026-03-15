@@ -1,4 +1,5 @@
 #include "display.h"
+#include "devices.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TJpg_Decoder.h>
@@ -106,9 +107,14 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 }
 
 bool updateSpotifyImage(String spotifyImageURL) {
-  if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
-  if (!getFile(spotifyImageURL, "/SpotifyTrack.jpg")) return false;
+  static String lastImageURL = "";
 
+  // Only fetch and redraw if the image URL has changed (e.g. new song)
+  if (spotifyImageURL != lastImageURL) {
+    if (SPIFFS.exists("/SpotifyTrack.jpg")) SPIFFS.remove("/SpotifyTrack.jpg");
+    if (!getFile(spotifyImageURL, "/SpotifyTrack.jpg")) return false;
+    lastImageURL = spotifyImageURL;
+  }
   uint16_t avgColor = getAverageColor();
   uint16_t textColor = getTextColor(avgColor);
 
@@ -120,7 +126,7 @@ bool updateSpotifyImage(String spotifyImageURL) {
 
   tft.fillRect(0, 0, 150, 45, avgColor);
   tft.fillRect(0, 195, 150, 45, avgColor);
-
+  displayReady = true;
   return true;
 }
 
@@ -143,11 +149,69 @@ static bool trackDone        = false, artistDone        = false;
 static bool trackPaused      = true,  artistPaused      = true;
 static unsigned long trackPauseStart = 0, artistPauseStart = 0;
 static bool spritesReady = false;
+bool displayReady = true;
 
 static String  spriteTrack   = "";
 static String  spriteArtists = "";
 static uint16_t bgColor      = TFT_BLACK;
 static uint16_t textColor    = TFT_WHITE;
+
+void clearScrollSprites() {
+  spritesReady = false;
+  sTrack.deleteSprite();
+  sArtist.deleteSprite();
+}
+
+void drawDevices() {
+  tft.fillScreen(TFT_BLACK);
+  clearScrollSprites(); 
+
+  // Header
+  tft.fillRect(0, 0, SCREEN_W, HEADER_H, ILI9341_DARKGREEN);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(8, 7);
+  tft.print("Spotify Devices");
+
+  if (deviceCount == 0) {
+    tft.setTextColor(ILI9341_YELLOW);
+    tft.setCursor(10, 50);
+    tft.println("No devices found.");
+    return;
+  }
+
+  int availableH = SCREEN_H - HEADER_H - 12;
+  int rowH       = min(50, availableH / deviceCount);
+  int fontSize   = (rowH >= 40) ? 2 : 1;
+
+  for (int i = 0; i < deviceCount; i++) {
+    Device& dev = deviceList[i];
+    int y = HEADER_H + i * rowH;
+
+    uint16_t rowColor = dev.active ? ILI9341_NAVY : (i % 2 == 0 ? 0x1082 : ILI9341_BLACK);
+    tft.fillRect(0, y, SCREEN_W, rowH - 1, rowColor);
+
+    if (dev.active) tft.fillCircle(7, y + rowH / 2, 4, ILI9341_GREEN);
+
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(fontSize);
+    tft.setCursor(16, y + 4);
+    tft.print(dev.name);
+
+    if (rowH >= 30) {
+      tft.setTextSize(1);
+      tft.setTextColor(ILI9341_CYAN);
+      tft.setCursor(16, y + (fontSize == 2 ? 24 : 14));
+      tft.printf("%s | Vol: %d%%", dev.type.c_str(), dev.volume);
+    }
+  }
+
+  // Footer
+  tft.setTextSize(1);
+  tft.setTextColor(0x7BEF);
+  tft.setCursor(8, SCREEN_H - 10);
+  tft.printf("%d device(s)", deviceCount);
+}
 
 void buildScrollSprites(String track, String artists, uint16_t bg, uint16_t fg) {
   spritesReady = false;
@@ -201,6 +265,7 @@ void buildScrollSprites(String track, String artists, uint16_t bg, uint16_t fg) 
 }
 
 void updateScrollSprites() {
+  if (!displayReady) return; 
   if (!spritesReady) return;
 
   static unsigned long lastScroll = 0;
@@ -302,8 +367,8 @@ void resetScroll() {
   spritesReady = false;
 }
 
-
 void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint16_t textColor) {
+  if (!displayReady) return; 
   if (!dirtyProgressBar) return;
   if (duration_ms == 0) return;
   dirtyProgressBar = false;
@@ -344,6 +409,8 @@ void initTFTScreen() {
   tft.begin();
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
+  uint16_t calData[5] = { 463, 3404, 209, 3557, 7 };
+  tft.setTouch(calData);
 }
 
 void initTJpegDecoder() {
