@@ -256,7 +256,7 @@ static void startVolume() {
 
 static void handleVolume() {
   int diff = abs(count - lastSentVolume);
-  if (diff > 5 && diff < 50) {
+  if (diff > 1 && diff < 50) {
     lastVolumeChange = millis();
     lastSentVolume   = count;
   }
