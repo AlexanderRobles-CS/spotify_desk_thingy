@@ -33,6 +33,9 @@ static SpotifyState state = STATE_IDLE;
 static unsigned long lastApiCall      = 0;
 static unsigned long lastProgressSync = 0;
 static unsigned long lastButtonPress  = 0;
+static unsigned long lastVolumeChange = 0;
+static int           lastSentVolume   = -1;
+static int           s_volumeToSend   = 0;
 static int           progress_ms      = 0;
 static int           duration_ms      = 0;
 static bool          playing          = false;
@@ -52,12 +55,14 @@ static volatile bool toggleDone       = false;
 static volatile bool prevDone         = false;
 static volatile bool skipDone         = false;
 static volatile bool deviceFetchDone  = false;
+static volatile bool volumeDone       = false;
 static char s_track[128]              = "";
 static char s_artists[256]            = "";
 static char s_imageUrl[128]           = "";
 static char s_playlist[128]           = "";
 static char s_id[64]                  = "";
 static char s_deviceId[64]            = "";
+static int  s_volume                  = 0;
 static int  s_progress_ms             = 0;
 static int  s_duration_ms             = 0;
 static bool s_playing                 = false;
@@ -80,13 +85,14 @@ void spotifyFetchTask(void* param) {
     strlcpy(s_imageUrl, result->reply["item"]["album"]["images"][1]["url"].as<const char*>(), sizeof(s_imageUrl));
     strlcpy(s_playlist, result->reply["context"]["uri"].as<const char*>(),                    sizeof(s_playlist));
     strlcpy(s_deviceId, result->reply["device"]["id"].as<const char*>(),                      sizeof(s_deviceId));
+    s_volume      = result->reply["device"]["volume_percent"] | 0;
     s_progress_ms = result->reply["progress_ms"];
     s_duration_ms = result->reply["item"]["duration_ms"];
     s_playing     = result->reply["is_playing"];
 
-    int count = result->reply["item"]["artists"].size();
+    int artistCount = result->reply["item"]["artists"].size();
     s_artists[0] = '\0';
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < artistCount; i++) {
       if (i > 0) strlcat(s_artists, ", ", sizeof(s_artists));
       strlcat(s_artists, result->reply["item"]["artists"][i]["name"].as<const char*>(), sizeof(s_artists));
     }
@@ -149,6 +155,14 @@ void playbackControlTask(void* param) {
   }
   toggleDone = true;
   Serial.println("[TOGGLE] task ending");
+  vTaskDelete(NULL);
+}
+
+void volumeControlTask(void* param) {
+  Serial.printf("[VOLUME] task started, sending %d\n", s_volumeToSend);
+  sp.set_volume(s_volumeToSend);
+  volumeDone = true;
+  Serial.println("[VOLUME] task ending");
   vTaskDelete(NULL);
 }
 
@@ -231,6 +245,23 @@ static void startToggle() {
   xTaskCreatePinnedToCore(playbackControlTask, "playback", 8192, NULL, 1, NULL, 0);
 }
 
+static void startVolume() {
+  volumeDone     = false;
+  s_volumeToSend = lastSentVolume;
+  lastVolumeChange = 0;
+  state          = STATE_TOGGLING;
+  Serial.printf("[STATE] → VOLUME (%d)\n", s_volumeToSend);
+  xTaskCreatePinnedToCore(volumeControlTask, "volume", 8192, NULL, 1, NULL, 0);
+}
+
+static void handleVolume() {
+  int diff = abs(count - lastSentVolume);
+  if (diff > 5 && diff < 50) {
+    lastVolumeChange = millis();
+    lastSentVolume   = count;
+  }
+}
+
 void handleDeviceTouch() {
   uint16_t x, y;
   if (!tft.getTouch(&x, &y, 20)) return;
@@ -270,6 +301,14 @@ void handleDeviceTouch() {
 }
 
 static void applyFetchResult() {
+  static bool volumeInitialized = false;
+  if (!volumeInitialized) {
+    Serial.printf("[VOLUME] initializing encoder to %d\n", s_volume);
+    count          = s_volume;
+    lastSentVolume = s_volume;
+    volumeInitialized = true;
+  }
+
   track       = s_track;
   id          = s_id;
   artists     = s_artists;
@@ -308,7 +347,7 @@ void initSpotify() {
 void updatePlayback() {
   unsigned long now = millis();
 
-  if (!displayReady) return; 
+  if (!displayReady) return;
 
   switch (state) {
 
@@ -317,27 +356,23 @@ void updatePlayback() {
       return;
 
     case STATE_IDLE:
-      if (playbackButtonPressed) {
-        playbackButtonPressed = false;
-        startToggle();
+      if (playbackButtonPressed) { playbackButtonPressed = false; startToggle(); break; }
+      if (prevButtonPressed)     { prevButtonPressed = false;     startPrev();   break; }
+      if (skipButtonPressed)     { skipButtonPressed = false;     startSkip();   break; }
+
+      handleVolume();
+      if (millis() - lastVolumeChange > 200 && lastVolumeChange != 0) {
+        startVolume();
         break;
       }
-      if (prevButtonPressed) {
-        prevButtonPressed = false;
-        startPrev();
-        break;
-      }
-      if (skipButtonPressed) {
-        skipButtonPressed = false;
-        startDeviceFetch();
-        break;
-      }
+
       if (now - lastApiCall > 5000) {
         startFetch();
       }
       break;
 
     case STATE_FETCHING:
+      handleVolume();
       if (fetchDone) {
         fetchDone = false;
         applyFetchResult();
@@ -350,18 +385,11 @@ void updatePlayback() {
       break;
 
     case STATE_TOGGLING:
-      if (toggleDone) {
-        toggleDone = false;
-        startFetch();
-      }
-      if (prevDone) {
-        prevDone = false;
-        startFetch();
-      }
-      if (skipDone) {
-        skipDone = false;
-        startFetch();
-      }
+      handleVolume();
+      if (toggleDone)     { toggleDone = false;     startFetch(); }
+      if (prevDone)       { prevDone   = false;      startFetch(); }
+      if (skipDone)       { skipDone   = false;      startFetch(); }
+      if (volumeDone)     { volumeDone = false;      startFetch(); }
       if (deviceFetchDone) {
         deviceFetchDone = false;
         drawDevices();
