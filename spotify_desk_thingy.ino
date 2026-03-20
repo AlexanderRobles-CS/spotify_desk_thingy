@@ -3,6 +3,7 @@
 #include "secrets.h"
 #include "display.h"
 #include "controls.h"
+#include "desk_idle.h"
 // ======================== WIFI ======================= //
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -39,6 +40,8 @@ void setup() {
   initSpotify();
 
   initControls();
+
+  initTime();
 }
 
 void loop() {
