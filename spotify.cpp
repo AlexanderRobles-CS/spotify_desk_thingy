@@ -270,7 +270,7 @@ static void handleVolume() {
 }
 
 void transitionToMainScreen() {
-  displayReady = true;
+  displayReady = false;
   if (updateSpotifyImage(imageUrl)) {
     bgColor   = getAverageColor();
     textColor = getTextColor(bgColor);
@@ -443,8 +443,7 @@ void updatePlayback() {
       break;
   }
 
-  if (state == STATE_DESK_IDLE || state == STATE_SHOWING_DEVICES) return;
-
+  if (state != STATE_IDLE) return;
 
   // ─── Progress (only runs when NOT showing devices) ────────────
   int displayProgress = progress_ms;
@@ -458,7 +457,7 @@ void updatePlayback() {
   int duration_min = duration_sec / 60;
   int duration_rem = duration_sec % 60;
 
-  if (state == STATE_IDLE && duration_ms > 0 && displayProgress >= duration_ms) {
+  if (duration_ms > 0 && displayProgress >= duration_ms) {
     startFetch();
     return;
   }

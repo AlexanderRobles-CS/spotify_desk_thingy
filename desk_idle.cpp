@@ -16,8 +16,9 @@ void printLocalTime() {
     return;
   }
   
-  strftime(timeStr, sizeof(timeStr), "%I:%M %p", &timeinfo);  // 09:45 PM
-  strftime(dateStr, sizeof(dateStr), "%B %d, %Y", &timeinfo); // March 20, 2026
+  strftime(timeStr, sizeof(timeStr), "%I:%M %p", &timeinfo);     // 09:45 PM
+  // strftime(dateStr, sizeof(dateStr), "%B %d, %Y", &timeinfo); // March 20, 2026
+  strftime(dateStr, sizeof(dateStr), "%A, %b %d %Y", &timeinfo); // Wednesday, Sep 11 2026  (22 chars = 264px, fits)
 
   Serial.println(timeStr);
   Serial.println(dateStr);
