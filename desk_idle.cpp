@@ -7,16 +7,15 @@ const long gmtOffset_sec = -28800;  // UTC-8
 const int  daylightOffset_sec = 3600; // auto DST
 
 struct tm timeinfo;
+char timeStr[32];
+char dateStr[32];
 
 void printLocalTime() {
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
     return;
   }
-
-  char timeStr[32];
-  char dateStr[32];
-
+  
   strftime(timeStr, sizeof(timeStr), "%I:%M %p", &timeinfo);  // 09:45 PM
   strftime(dateStr, sizeof(dateStr), "%B %d, %Y", &timeinfo); // March 20, 2026
 

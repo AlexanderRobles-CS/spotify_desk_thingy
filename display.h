@@ -24,3 +24,4 @@ void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint1
 void markProgressDirty();
 void markTrackDirty();
 void clearScrollSprites();
+void drawIdleScreen();

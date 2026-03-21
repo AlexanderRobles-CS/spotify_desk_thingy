@@ -1,5 +1,6 @@
 #include "display.h"
 #include "devices.h"
+#include "desk_idle.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <TJpg_Decoder.h>
@@ -160,6 +161,22 @@ void clearScrollSprites() {
   spritesReady = false;
   sTrack.deleteSprite();
   sArtist.deleteSprite();
+}
+
+void drawIdleScreen() {
+  Serial.printf("[IDLE] drawing - time: '%s' date: '%s'\n", timeStr, dateStr);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(ILI9341_WHITE);
+  clearScrollSprites(); 
+
+  // Time - big, centered
+  tft.setTextDatum(MC_DATUM);  // middle center
+  tft.setTextSize(3);
+  tft.drawString(timeStr, 160, 100, 4);
+
+  // Date - smaller, centered
+  tft.setTextSize(2);
+  tft.drawString(dateStr, 160, 150, 2);
 }
 
 void drawDevices() {
