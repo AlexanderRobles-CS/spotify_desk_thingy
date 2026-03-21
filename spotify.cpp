@@ -69,6 +69,8 @@ static int  s_volume                  = 0;
 static int  s_progress_ms             = 0;
 static int  s_duration_ms             = 0;
 static bool s_playing                 = false;
+static bool idleDrawn                 = false;
+static bool wasIdle                   = false;
 
 // ─── Tasks ────────────────────────────────────────────────────────
 
@@ -267,6 +269,18 @@ static void handleVolume() {
   }
 }
 
+void transitionToMainScreen() {
+  displayReady = true;
+  if (updateSpotifyImage(imageUrl)) {
+    bgColor   = getAverageColor();
+    textColor = getTextColor(bgColor);
+    buildScrollSprites(track, artists, bgColor, textColor);
+    lastSong  = id;
+  }
+  lastApiCall = millis();
+  state = STATE_IDLE;
+}
+
 void handleDeviceTouch() {
   uint16_t x, y;
   if (!tft.getTouch(&x, &y, 20)) return;
@@ -293,16 +307,7 @@ void handleDeviceTouch() {
   drawDevices();
   delay(1000);
 
-  // go back to main screen
-  tft.fillScreen(bgColor);
-  lastSong = "";
-  displayReady = true;
-  updateSpotifyImage(imageUrl);
-  bgColor   = getAverageColor();
-  textColor = getTextColor(bgColor);
-  buildScrollSprites(track, artists, bgColor, textColor);
-  lastApiCall = millis();
-  state = STATE_IDLE;
+  transitionToMainScreen();
 }
 
 static void applyFetchResult() {
@@ -326,23 +331,22 @@ static void applyFetchResult() {
     playing = s_playing;
   }
 
-  if (lastSong != id) {
-    displayReady = false;
-    if (updateSpotifyImage(imageUrl)) {
-      bgColor   = getAverageColor();
-      textColor = getTextColor(bgColor);
-      buildScrollSprites(track, artists, bgColor, textColor);
-      lastSong  = id;
-    }
-  }
-
   lastProgressSync = millis();
 
   if (!s_playing) {
+    clearScrollSprites();
+    displayReady = true;
+    wasIdle = true;
     state = STATE_DESK_IDLE;
     Serial.println("[STATE] → DESK_IDLE");
   } else {
-    state = STATE_IDLE;
+    idleDrawn = false;
+    if (wasIdle || lastSong != id) {
+      wasIdle = false;
+      transitionToMainScreen();
+    } else {
+      state = STATE_IDLE;
+    }
     Serial.println("[STATE] → IDLE");
   }
 }
@@ -358,8 +362,10 @@ void initSpotify() {
 
 void updatePlayback() {
   unsigned long now = millis();
-
-  if (!displayReady) return;
+  if (!displayReady) {
+    Serial.println("[UPDATE] blocked - displayReady=false");
+    return;
+  }
 
   switch (state) {
 
@@ -396,16 +402,30 @@ void updatePlayback() {
       break;
 
     case STATE_DESK_IDLE:
-      if (playbackButtonPressed) { playbackButtonPressed = false; startToggle(); break; }
-      if (prevButtonPressed)     { prevButtonPressed = false;     startPrev();   break; }
-      if (skipButtonPressed)     { skipButtonPressed = false;     startSkip();   break; }
+      if (playbackButtonPressed) { playbackButtonPressed = false; idleDrawn = false; startToggle(); break; }
+      if (prevButtonPressed)     { prevButtonPressed = false;     idleDrawn = false; startPrev();   break; }
+      if (skipButtonPressed)     { skipButtonPressed = false;     idleDrawn = false; startSkip();   break; }
 
       if (now - lastApiCall > 30000) startFetch();
+
+      if (!idleDrawn) {
+        printLocalTime();
+        drawIdleScreen();
+        idleDrawn = true;
+      }
 
       static unsigned long lastTimePrint = 0;
       if (now - lastTimePrint > 1000) {
         lastTimePrint = now;
+        int prevMin  = timeinfo.tm_min;
+        int prevHour = timeinfo.tm_hour;
+        int prevDay  = timeinfo.tm_mday;
         printLocalTime();
+        if (timeinfo.tm_min  != prevMin  ||
+            timeinfo.tm_hour != prevHour ||
+            timeinfo.tm_mday != prevDay) {
+          drawIdleScreen();
+        }
       }
       break;
 
@@ -422,6 +442,9 @@ void updatePlayback() {
       }
       break;
   }
+
+  if (state == STATE_DESK_IDLE || state == STATE_SHOWING_DEVICES) return;
+
 
   // ─── Progress (only runs when NOT showing devices) ────────────
   int displayProgress = progress_ms;
