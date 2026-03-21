@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SpotifyEsp32.h>
 #include "esp_task_wdt.h"
+#include "desk_idle.h"
 #include "spotify.h"
 #include "secrets.h"
 #include "display.h"
@@ -23,7 +24,8 @@ enum SpotifyState {
   STATE_IDLE,
   STATE_FETCHING,
   STATE_TOGGLING,
-  STATE_SHOWING_DEVICES
+  STATE_SHOWING_DEVICES,
+  STATE_DESK_IDLE
 };
 
 static SpotifyState state = STATE_IDLE;
@@ -56,6 +58,7 @@ static volatile bool prevDone         = false;
 static volatile bool skipDone         = false;
 static volatile bool deviceFetchDone  = false;
 static volatile bool volumeDone       = false;
+static volatile bool timePause        = false;
 static char s_track[128]              = "";
 static char s_artists[256]            = "";
 static char s_imageUrl[128]           = "";
@@ -134,6 +137,7 @@ void skipControlTask(void* param) {
   Serial.printf("[SKIP] task started");
   sp.skip();
   skipDone = true;
+  timePause = false;
   Serial.println("[SKIP] task ending");
   vTaskDelete(NULL);
 }
@@ -142,6 +146,7 @@ void prevControlTask(void* param) {
   Serial.printf("[PREVIOUS] task started");
   sp.previous();
   prevDone = true;
+  timePause = false;
   Serial.println("[PREVIOUS] task ending");
   vTaskDelete(NULL);
 }
@@ -154,6 +159,7 @@ void playbackControlTask(void* param) {
     sp.pause_playback();
   }
   toggleDone = true;
+  timePause = false;
   Serial.println("[TOGGLE] task ending");
   vTaskDelete(NULL);
 }
@@ -212,8 +218,7 @@ static void startDeviceFetch() {
 
 static void startSkip() {
   skipDone         = false;
-  progress_ms      = 0;
-  lastProgressSync = millis();
+  timePause        = true;
   state            = STATE_TOGGLING;
   Serial.println("[STATE] → SKIP");
   xTaskCreatePinnedToCore(skipControlTask, "skip", 8192, NULL, 1, NULL, 0);
@@ -221,8 +226,7 @@ static void startSkip() {
 
 static void startPrev() {
   prevDone         = false;
-  progress_ms      = 0;
-  lastProgressSync = millis();
+  timePause        = true;
   state            = STATE_TOGGLING;
   Serial.println("[STATE] → PREVIOUS");
   xTaskCreatePinnedToCore(prevControlTask, "previous", 8192, NULL, 1, NULL, 0);
@@ -231,6 +235,7 @@ static void startPrev() {
 static void startToggle() {
   toggleDone      = false;
   playing         = !playing;
+  timePause       = true;
   lastButtonPress = millis();
 
   if (!playing) {
@@ -332,7 +337,14 @@ static void applyFetchResult() {
   }
 
   lastProgressSync = millis();
-  Serial.println("[STATE] → IDLE");
+
+  if (!s_playing) {
+    state = STATE_DESK_IDLE;
+    Serial.println("[STATE] → DESK_IDLE");
+  } else {
+    state = STATE_IDLE;
+    Serial.println("[STATE] → IDLE");
+  }
 }
 
 // ─── Init ─────────────────────────────────────────────────────────
@@ -376,11 +388,24 @@ void updatePlayback() {
       if (fetchDone) {
         fetchDone = false;
         applyFetchResult();
-        state = STATE_IDLE;
         if (playbackButtonPressed) {
           playbackButtonPressed = false;
           startToggle();
         }
+      }
+      break;
+
+    case STATE_DESK_IDLE:
+      if (playbackButtonPressed) { playbackButtonPressed = false; startToggle(); break; }
+      if (prevButtonPressed)     { prevButtonPressed = false;     startPrev();   break; }
+      if (skipButtonPressed)     { skipButtonPressed = false;     startSkip();   break; }
+
+      if (now - lastApiCall > 30000) startFetch();  // ← add this
+
+      static unsigned long lastTimePrint = 0;
+      if (now - lastTimePrint > 1000) {
+        lastTimePrint = now;
+        printLocalTime();
       }
       break;
 
@@ -401,6 +426,7 @@ void updatePlayback() {
   // ─── Progress (only runs when NOT showing devices) ────────────
   int displayProgress = progress_ms;
   if (playing) displayProgress += (int)(now - lastProgressSync);
+  if (displayProgress < 0) displayProgress = 0;
 
   int progress_sec = displayProgress / 1000;
   int duration_sec = duration_ms / 1000;
@@ -425,9 +451,9 @@ void updatePlayback() {
   updateProgressBar(clampedProgress, duration_ms, bgColor, textColor);
 
   static unsigned long lastPrint = 0;
-  if (now - lastPrint > 1000) {
-    lastPrint = now;
-    Serial.printf("Currently playing: %s - %s\n", track.c_str(), artists.c_str());
-    Serial.printf("Time: %d:%02d / %d:%02d\n", progress_min, progress_rem, duration_min, duration_rem);
+  if (state == STATE_IDLE && now - lastPrint > 1000 && !timePause) {
+      lastPrint = now;
+      Serial.printf("Currently playing: %s - %s\n", track.c_str(), artists.c_str());
+      Serial.printf("Time: %d:%02d / %d:%02d\n", progress_min, progress_rem, duration_min, duration_rem);
   }
 }

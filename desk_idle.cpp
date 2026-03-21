@@ -3,8 +3,8 @@
 #include "desk_idle.h"
 
 const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = 0;
-const int   daylightOffset_sec = 0;
+const long gmtOffset_sec = -28800;  // UTC-8
+const int  daylightOffset_sec = 3600; // auto DST
 
 struct tm timeinfo;
 
@@ -13,11 +13,19 @@ void printLocalTime() {
     Serial.println("Failed to obtain time");
     return;
   }
-}
 
+  char timeStr[32];
+  char dateStr[32];
+
+  strftime(timeStr, sizeof(timeStr), "%I:%M %p", &timeinfo);  // 09:45 PM
+  strftime(dateStr, sizeof(dateStr), "%B %d, %Y", &timeinfo); // March 20, 2026
+
+  Serial.println(timeStr);
+  Serial.println(dateStr);
+}
 void initTime() {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  struct tm timeinfo;
+  
   Serial.print("Waiting for NTP sync");
   while (!getLocalTime(&timeinfo)) {
     Serial.print(".");
