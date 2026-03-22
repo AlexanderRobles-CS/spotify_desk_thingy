@@ -10,5 +10,6 @@ extern volatile bool          skipButtonPressed;
 extern volatile unsigned long last_skip_interrupt_time;
 
 extern volatile int  count;
+extern volatile bool encoderChanged;
 
 void initControls();

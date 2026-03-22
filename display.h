@@ -7,6 +7,8 @@
 
 extern TFT_eSPI tft;
 extern bool displayReady;
+extern unsigned long volumeOverlayShownAt;
+extern bool volumeOverlayVisible;
 
 bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap);
 bool updateSpotifyImage(String spotifyImageURL);
@@ -25,3 +27,4 @@ void markProgressDirty();
 void markTrackDirty();
 void clearScrollSprites();
 void drawIdleScreen();
+void showVolumeOverlay(int volumePct, uint16_t bgCol, uint16_t textCol);

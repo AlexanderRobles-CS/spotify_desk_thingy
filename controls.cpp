@@ -19,6 +19,7 @@ const int rotary_dt  = 27;
 const int rotary_sw  = 25;
 
 volatile int  count            = 0;
+volatile bool encoderChanged = false;
 unsigned long lastDebounceTime = 0;
 const    int  debounceDelay    = 15;
 
@@ -63,6 +64,7 @@ void IRAM_ATTR handleEncoder() {
   } else {
     count = max(0, count - step);
   }
+  encoderChanged = true;
 }
 
 void initControls() {

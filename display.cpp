@@ -24,6 +24,9 @@ static int trackScrollX  = 158;
 static int artistScrollX = 158;
 static unsigned long lastScroll = 0;
 
+unsigned long volumeOverlayShownAt = 0;
+bool volumeOverlayVisible = false;
+
 void markProgressDirty() { dirtyProgressBar = true; }
 void markTrackDirty()    { dirtyTrackInfo   = true; }
 
@@ -464,6 +467,42 @@ void updateProgressBar(int progress_ms, int duration_ms, uint16_t bgColor, uint1
   tft.setCursor(barX, barY + 10);
   tft.printf("%d:%02d / %d:%02d", progress_sec / 60, progress_sec % 60, duration_sec / 60, duration_sec % 60);
   tft.endWrite();
+}
+
+void showVolumeOverlay(int volumePct, uint16_t bgCol, uint16_t textCol) {
+  if (volumePct < 0 || volumePct > 100) return;
+
+  int barX = 158;
+  int barW = 154;
+  int barH = 4;
+  int barY = 168;
+
+  int filled = (int)((volumePct / 100.0f) * barW);
+
+  char volStr[5];
+  snprintf(volStr, sizeof(volStr), "%d%%", volumePct);
+
+  tft.startWrite(); // hold SPI for entire overlay draw
+  
+  // label
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(textCol, bgCol);
+  tft.drawString("VOL", barX, barY - 10, 1);
+
+  // percentage
+  tft.setTextDatum(MR_DATUM);
+  tft.setTextColor(textCol, bgCol);
+  tft.drawString(volStr, barX + barW, barY - 10, 1);
+
+  // bar
+  for (int row = barY; row < barY + barH; row++) {
+    tft.drawFastHLine(barX, row, filled, textCol);
+    tft.drawFastHLine(barX + filled, row, barW - filled, tft.color565(80, 80, 80));
+  }
+
+  tft.endWrite();
+
+  volumeOverlayShownAt = millis();
 }
 
 void initSPIFFS() {

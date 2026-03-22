@@ -262,10 +262,16 @@ static void startVolume() {
 }
 
 static void handleVolume() {
-  int diff = abs(count - lastSentVolume);
-  if (diff > 1 && diff < 50) {
-    lastVolumeChange = millis();
+  if (!encoderChanged) return;
+  encoderChanged = false;
+
+  int diff = count - lastSentVolume;
+  if (diff != 0 && abs(diff) < 50) {
     lastSentVolume   = count;
+    lastVolumeChange = millis();
+    showVolumeOverlay(lastSentVolume, bgColor, textColor);
+    volumeOverlayVisible = true;
+    volumeOverlayShownAt = millis();
   }
 }
 
@@ -434,7 +440,10 @@ void updatePlayback() {
       if (toggleDone)     { toggleDone = false;     startFetch(); }
       if (prevDone)       { prevDone   = false;      startFetch(); }
       if (skipDone)       { skipDone   = false;      startFetch(); }
-      if (volumeDone)     { volumeDone = false;      startFetch(); }
+      if (volumeDone)     { 
+        volumeDone = false;
+        state = STATE_IDLE;
+      }
       if (deviceFetchDone) {
         deviceFetchDone = false;
         drawDevices();
@@ -471,6 +480,12 @@ void updatePlayback() {
   updateScrollSprites();
   int clampedProgress = min(displayProgress, duration_ms);
   updateProgressBar(clampedProgress, duration_ms, bgColor, textColor);
+
+  if (volumeOverlayShownAt > 0 && now - volumeOverlayShownAt > 2000) {
+    volumeOverlayShownAt = 0;
+    volumeOverlayVisible = false;
+    tft.fillRect(156, 143, 158, 37, bgColor);
+  }
 
   static unsigned long lastPrint = 0;
   if (state == STATE_IDLE && now - lastPrint > 1000 && !timePause) {
