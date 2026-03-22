@@ -166,17 +166,70 @@ void clearScrollSprites() {
 void drawIdleScreen() {
   Serial.printf("[IDLE] drawing - time: '%s' date: '%s'\n", timeStr, dateStr);
   tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(ILI9341_WHITE);
-  clearScrollSprites(); 
+  clearScrollSprites();
 
-  // Time - big, centered
-  tft.setTextDatum(MC_DATUM);  // middle center
-  tft.setTextSize(3);
-  tft.drawString(timeStr, 160, 100, 4);
+  // ── TIME ─────────────────────────────────────────────────────────
+  char hours[3] = { timeStr[0], timeStr[1], '\0' };
+  char mins[3]  = { timeStr[3], timeStr[4], '\0' };
 
-  // Date - smaller, centered
-  tft.setTextSize(2);
-  tft.drawString(dateStr, 160, 150, 2);
+  tft.setTextColor(0xEF5D, TFT_BLACK);
+  tft.setTextDatum(MR_DATUM);
+  tft.drawString(hours, 150, 65, 7);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString(":", 160, 61, 7);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString(mins, 170, 65, 7);
+
+  // ── DATE ─────────────────────────────────────────────────────────
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(0x6B4D, TFT_BLACK);
+  tft.drawString(dateStr, 160, 114, 2);
+
+  // ── DIVIDER ──────────────────────────────────────────────────────
+  tft.drawFastHLine(40, 132, 240, 0x2945);
+
+  // ── WEATHER ROW ──────────────────────────────────────────────────
+  const char* tempStr = "72F";
+  const char* hlStr   = "H:76  L:58";
+  const char* condStr = "SUNNY";
+
+  int sunWidth  = 36;
+  int leftWidth = max(tft.textWidth(tempStr, 4),
+                      tft.textWidth(hlStr, 1));
+  int sepGap    = 16;
+  int condWidth = tft.textWidth(condStr, 2);
+  int totalWidth = sunWidth + leftWidth + sepGap + condWidth;
+
+  int wx = (320 - totalWidth) / 2;
+  int wy = 190;
+
+  // Sun icon
+  tft.fillCircle(wx + 10, wy, 9, 0xD4A0);
+  for (int i = 0; i < 8; i++) {
+    float angle = i * PI / 4;
+    int x1 = wx + 10 + cos(angle) * 13;
+    int y1 = wy + sin(angle) * 13;
+    int x2 = wx + 10 + cos(angle) * 17;
+    int y2 = wy + sin(angle) * 17;
+    tft.drawLine(x1, y1, x2, y2, 0xD4A0);
+  }
+
+  // Temp
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(0xC618, TFT_BLACK);
+  tft.drawString(tempStr, wx + sunWidth, wy - 8, 4);
+
+  // High
+  tft.setTextColor(0x528A, TFT_BLACK);
+  tft.drawString(hlStr, wx + sunWidth, wy + 10, 1);
+
+  // Vertical separator
+  int sepX = wx + sunWidth + leftWidth + 6;
+  tft.drawFastVLine(sepX, wy - 14, 28, 0x2945);
+
+  // Condition
+  tft.setTextColor(0x528A, TFT_BLACK);
+  tft.drawString(condStr, sepX + 10, wy, 2);
 }
 
 void drawDevices() {
